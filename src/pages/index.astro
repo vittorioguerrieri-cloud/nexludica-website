@@ -36,19 +36,9 @@ const partners = [
 ---
 
 <BaseLayout title="NexLudica APS — Cultura ludica per l'inclusione sociale">
-  <!-- Hero audace: tipografia gigante + blocco cyan + dado grande -->
+  <!-- Hero: tipografia gigante con accent evidenziatore -->
   <section class="relative overflow-hidden bg-nx-off-white px-4 pb-24 pt-24 lg:pb-32 lg:pt-32">
-    <!-- Blocco cyan diagonale come accento di sfondo -->
-    <div class="pointer-events-none absolute -right-24 top-1/2 h-[500px] w-[500px] -translate-y-1/2 rotate-12 bg-nx-cyan/10 lg:h-[700px] lg:w-[700px]"></div>
-    <!-- Dado gigante semi-trasparente decorativo -->
-    <img
-      src="/images/branding/die-3.svg"
-      alt=""
-      aria-hidden="true"
-      class="pointer-events-none absolute -right-10 top-10 h-48 w-auto opacity-20 lg:right-40 lg:top-20 lg:h-64"
-    />
-
-    <div class="relative mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2">
+    <div class="relative mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1.1fr_1fr]">
       <div>
         <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">
           Game · Research · Inclusion
@@ -82,16 +72,12 @@ const partners = [
         </div>
       </div>
       <div class="hidden lg:block">
-        <div class="relative">
-          <!-- Grande blocco cyan offsettato dietro l'immagine -->
-          <div class="absolute -right-6 -top-6 h-full w-full bg-nx-cyan"></div>
-          <img
-            src="/images/community.png"
-            alt="Momenti dalla comunità NexLudica"
-            class="relative z-10 w-full"
-            loading="eager"
-          />
-        </div>
+        <img
+          src="/images/community.png"
+          alt="Momenti dalla comunità NexLudica"
+          class="w-full"
+          loading="eager"
+        />
       </div>
     </div>
   </section>
