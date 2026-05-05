@@ -1,9 +1,24 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import { upcomingMeetings, articles, formatItalianDate } from "../lib/meetludica";
+import { upcomingMeetings } from "../lib/meetludica";
+import { getDb } from "../server/db";
+import { listPublishedArticles, type PublicArticle } from "../server/articles";
+
+export const prerender = false;
 
 const meetings = upcomingMeetings(6);
-const sortedArticles = [...articles].sort((a, b) => b.date.localeCompare(a.date));
+
+// @ts-expect-error
+const env: Env | undefined = Astro.locals?.runtime?.env;
+const db = env ? getDb(env) : null;
+let articles: PublicArticle[] = [];
+if (db) {
+  try {
+    articles = await listPublishedArticles(db);
+  } catch {
+    articles = [];
+  }
+}
 ---
 
 <BaseLayout title="MeetLudica — NexLudica APS" description="MeetLudica: il network mensile di chi fa ricerca sul gioco da tavolo. Ultimo giovedì del mese, 20:30. Calendario, archivio articoli e modalità di partecipazione.">
@@ -54,8 +69,9 @@ const sortedArticles = [...articles].sort((a, b) => b.date.localeCompare(a.date)
     </div>
     <p class="mt-8 max-w-3xl text-base leading-relaxed text-nx-gray-dark">
       Dopo ogni incontro pubblichiamo un <strong class="text-nx-dark">resoconto</strong> con
-      il riepilogo del progetto presentato e i feedback emersi durante la discussione. Tutti
-      i resoconti sono archiviati in questa pagina e accessibili a chi partecipa al network.
+      il riepilogo del progetto presentato e i feedback emersi durante la discussione.
+      I soci possono caricare i propri resoconti dalla
+      <a href="/area-soci/articoli/nuovo" class="text-nx-cyan no-underline hover:underline">area soci</a>.
     </p>
   </section>
 
@@ -112,10 +128,12 @@ const sortedArticles = [...articles].sort((a, b) => b.date.localeCompare(a.date)
   <section class="mx-auto max-w-5xl px-4 py-20">
     <div class="flex flex-wrap items-baseline justify-between gap-4">
       <h2 class="text-3xl font-bold text-nx-dark">Archivio dei resoconti</h2>
-      <p class="text-sm text-nx-gray-dark">{sortedArticles.length} articoli pubblicati</p>
+      <p class="text-sm text-nx-gray-dark">
+        {articles.length} {articles.length === 1 ? "articolo pubblicato" : "articoli pubblicati"}
+      </p>
     </div>
 
-    {sortedArticles.length === 0 ? (
+    {articles.length === 0 ? (
       <div class="mt-10 rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-nx-off-white p-12 text-center">
         <p class="text-lg font-semibold text-nx-dark">L'archivio sta crescendo</p>
         <p class="mt-2 text-nx-gray-dark">
@@ -123,24 +141,27 @@ const sortedArticles = [...articles].sort((a, b) => b.date.localeCompare(a.date)
           abstract e materiali dei relatori.
         </p>
         <p class="mt-4 text-sm text-nx-gray-dark">
-          Vuoi essere il prossimo relatore?
-          <a href="mailto:info@nexludica.org?subject=Proposta%20talk%20MeetLudica" class="font-semibold text-nx-cyan no-underline hover:underline">
-            Proponi un talk
+          Sei un socio?
+          <a href="/area-soci/articoli/nuovo" class="font-semibold text-nx-cyan no-underline hover:underline">
+            Carica il primo resoconto
           </a>.
         </p>
       </div>
     ) : (
       <ul class="mt-10 space-y-6">
-        {sortedArticles.map((a) => (
+        {articles.map((a) => (
           <li class="rounded-xl border border-nx-gray-light/20 bg-white p-6 transition hover:shadow-md">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 class="text-xl font-bold text-nx-dark">{a.title}</h3>
                 <p class="mt-1 text-sm text-nx-gray-dark">
-                  {a.speaker} · {new Date(a.date).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
+                  {a.speaker} · {new Date(a.meetingDate).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
+                </p>
+                <p class="mt-0.5 text-xs text-nx-gray-dark">
+                  Caricato da {a.authorName}
                 </p>
               </div>
-              {a.tags && (
+              {a.tags.length > 0 && (
                 <div class="flex flex-wrap gap-2">
                   {a.tags.map((t) => (
                     <span class="rounded-full bg-nx-cyan-light px-3 py-1 text-xs font-medium text-nx-cyan">
@@ -150,7 +171,7 @@ const sortedArticles = [...articles].sort((a, b) => b.date.localeCompare(a.date)
                 </div>
               )}
             </div>
-            <p class="mt-3 leading-relaxed text-nx-gray-dark">{a.abstract}</p>
+            <p class="mt-3 leading-relaxed text-nx-gray-dark whitespace-pre-line">{a.abstract}</p>
             <div class="mt-4 flex flex-wrap gap-4">
               {a.documentUrl && (
                 <a href={a.documentUrl} target="_blank" rel="noopener noreferrer" class="text-sm font-semibold text-nx-cyan no-underline hover:underline">

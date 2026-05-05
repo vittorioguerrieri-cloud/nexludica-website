@@ -1,0 +1,68 @@
+---
+import AreaSociLayout from "../../layouts/AreaSociLayout.astro";
+import { driveFolders } from "../../lib/drive";
+
+export const prerender = false;
+---
+
+<AreaSociLayout title="Verbali e documenti — Area Soci" active="verbali">
+  <div>
+    <h2 class="text-2xl font-bold text-nx-dark">Verbali e documenti dell'associazione</h2>
+    <p class="mt-2 max-w-3xl text-sm text-nx-gray-dark">
+      Cartelle condivise via Google Drive con i documenti utili alla vita dell'associazione.
+      L'accesso è ristretto ai soci tramite l'account Google associato all'email che ti
+      identifica come socio.
+    </p>
+  </div>
+
+  <div class="mt-8 grid gap-4 sm:grid-cols-2">
+    {driveFolders.map((f) => {
+      const ready = f.url != null;
+      return (
+        <a
+          href={f.url ?? "#"}
+          target={ready ? "_blank" : undefined}
+          rel={ready ? "noopener noreferrer" : undefined}
+          class={`group flex gap-4 rounded-xl border bg-white p-6 no-underline transition ${
+            ready
+              ? "border-nx-gray-light/20 hover:border-nx-cyan hover:shadow-md"
+              : "cursor-not-allowed border-nx-gray-light/20 opacity-60"
+          }`}
+        >
+          <span class={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-xl ${
+            ready ? "bg-nx-cyan-light text-nx-cyan" : "bg-nx-gray-light/20 text-nx-gray-dark"
+          }`}>
+            {f.icon}
+          </span>
+          <div class="min-w-0">
+            <p class="text-base font-bold text-nx-dark">{f.title}</p>
+            <p class="mt-1 text-sm text-nx-gray-dark">{f.description}</p>
+            <p class={`mt-3 text-xs font-semibold uppercase tracking-wider ${
+              ready ? "text-nx-cyan" : "text-amber-700"
+            }`}>
+              {ready ? "Apri su Drive →" : "Cartella in configurazione"}
+            </p>
+          </div>
+        </a>
+      );
+    })}
+  </div>
+
+  <div class="mt-12 rounded-xl border border-nx-gray-light/20 bg-nx-off-white p-6">
+    <h3 class="text-base font-bold text-nx-dark">Come configurare le cartelle Drive</h3>
+    <ol class="mt-3 space-y-2 text-sm text-nx-gray-dark">
+      <li>1. Crea una cartella su Google Drive (es. "NexLudica · Verbali").</li>
+      <li>2. Click destro → Condividi → "Chiunque con il link" oppure aggiungi gli account dei soci.</li>
+      <li>3. Copia l'URL della cartella.</li>
+      <li>
+        4. Modifica <code class="rounded bg-white px-1.5 py-0.5 text-xs">src/lib/drive.ts</code> e
+        incolla l'URL nel campo <code>url</code> della voce corrispondente.
+      </li>
+      <li>5. Commit + push: il sito si aggiorna in pochi minuti.</li>
+    </ol>
+    <p class="mt-3 text-xs text-nx-gray-dark">
+      Più avanti possiamo integrarci con la Drive API per mostrare direttamente la lista dei
+      file in pagina, con anteprima e download.
+    </p>
+  </div>
+</AreaSociLayout>

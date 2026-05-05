@@ -1,11 +1,29 @@
 {
 	"compatibility_date": "2026-05-05",
-	"compatibility_flags": ["global_fetch_strictly_public"],
+	"compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
 	"name": "nexludica",
 	"main": "@astrojs/cloudflare/entrypoints/server",
 	"assets": {
 		"directory": "./dist",
 		"binding": "ASSETS"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "nexludica",
+			"database_id": "REPLACE_WITH_OUTPUT_OF_wrangler_d1_create"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "STORAGE",
+			"bucket_name": "nexludica-articles"
+		}
+	],
+	"vars": {
+		"SITE_URL": "https://nexludica-website.vittorio-guerrieri-310.workers.dev",
+		"FROM_EMAIL": "noreply@nexludica.org",
+		"FROM_NAME": "NexLudica APS"
 	},
 	"observability": {
 		"enabled": true

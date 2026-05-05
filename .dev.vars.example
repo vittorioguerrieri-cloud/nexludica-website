@@ -1,0 +1,10 @@
+# Copia questo file in .dev.vars (non committato) per testare in locale.
+# In produzione usa: wrangler secret put NOME_VAR
+
+# Resend API key per inviare le email di magic link.
+# Se vuoto, in dev il magic link viene loggato in console.
+RESEND_API_KEY=
+
+# Segreto per firmare i token di sessione.
+# Genera con: openssl rand -base64 32
+SESSION_SECRET=dev-only-change-me-in-production

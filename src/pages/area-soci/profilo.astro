@@ -1,0 +1,135 @@
+---
+import AreaSociLayout from "../../layouts/AreaSociLayout.astro";
+import { getDb } from "../../server/db";
+import { getMyProfile } from "../../server/profiles";
+
+export const prerender = false;
+
+const user = (Astro.locals as any).user as { id: string; name: string; email: string; role: string } | null;
+// @ts-expect-error
+const env: Env | undefined = Astro.locals?.runtime?.env;
+const db = env ? getDb(env) : null;
+const profile = (db && user) ? await getMyProfile(db, user.id) : null;
+---
+
+<AreaSociLayout title="Il mio profilo — Area Soci" active="profilo">
+  <div class="rounded-xl border border-nx-gray-light/20 bg-white p-8">
+    <h2 class="text-2xl font-bold text-nx-dark">Il mio profilo</h2>
+    <p class="mt-2 text-sm text-nx-gray-dark">
+      Le informazioni inserite qui appariranno nella pagina pubblica
+      <a href="/chi-siamo" class="text-nx-cyan no-underline hover:underline">Chi siamo</a> se hai
+      attivato la visibilità pubblica.
+    </p>
+
+    <form id="profile-form" class="mt-8 space-y-5">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label for="displayName" class="block text-sm font-medium text-nx-dark">Nome visualizzato</label>
+          <input type="text" id="displayName" name="displayName" maxlength="80"
+                 value={profile?.name ?? user?.name ?? ""}
+                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label for="roleLabel" class="block text-sm font-medium text-nx-dark">Ruolo nell'associazione</label>
+          <input type="text" id="roleLabel" name="roleLabel" maxlength="80"
+                 placeholder="es. Presidente, Game designer, Ricercatrice"
+                 value={profile?.roleLabel ?? ""}
+                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label for="skills" class="block text-sm font-medium text-nx-dark">Competenze</label>
+          <input type="text" id="skills" name="skills" maxlength="200"
+                 placeholder="es. Psicometria · Game design · Lavoro sociale"
+                 value={profile?.skills ?? ""}
+                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div class="sm:col-span-2">
+          <label for="bio" class="block text-sm font-medium text-nx-dark">Bio</label>
+          <textarea id="bio" name="bio" rows="5" maxlength="1000"
+                    placeholder="Una breve presentazione che apparirà sulla pagina pubblica."
+                    class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">{profile?.bio ?? ""}</textarea>
+        </div>
+        <div>
+          <label for="photoUrl" class="block text-sm font-medium text-nx-dark">URL foto profilo</label>
+          <input type="url" id="photoUrl" name="photoUrl" maxlength="500"
+                 placeholder="https://..."
+                 value={profile?.photoUrl ?? ""}
+                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <p class="mt-1 text-xs text-nx-gray-dark">Per ora un link esterno. Upload dei file in arrivo.</p>
+        </div>
+        <div>
+          <label for="website" class="block text-sm font-medium text-nx-dark">Sito web (opzionale)</label>
+          <input type="url" id="website" name="website" maxlength="200"
+                 value={profile?.website ?? ""}
+                 placeholder="https://"
+                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label for="linkedin" class="block text-sm font-medium text-nx-dark">LinkedIn (opzionale)</label>
+          <input type="url" id="linkedin" name="linkedin" maxlength="200"
+                 value={profile?.linkedin ?? ""}
+                 placeholder="https://www.linkedin.com/in/..."
+                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="flex items-start gap-3 rounded-lg border border-nx-gray-light/20 bg-nx-off-white p-4">
+            <input type="checkbox" id="publicVisible" name="publicVisible" value="1"
+                   checked={profile ? profile.publicVisible : true}
+                   class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+            <div>
+              <span class="text-sm font-semibold text-nx-dark">Mostra il mio profilo nella pagina pubblica "Chi siamo"</span>
+              <p class="mt-1 text-xs text-nx-gray-dark">
+                Disattiva se vuoi mantenere il profilo nascosto. Le tue pubblicazioni MeetLudica restano visibili a tuo nome.
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4 pt-2">
+        <button type="submit" class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue">
+          Salva profilo
+        </button>
+        <span id="profile-status" class="text-sm text-nx-gray-dark"></span>
+      </div>
+    </form>
+  </div>
+</AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("profile-form");
+    const status = document.getElementById("profile-status");
+    if (!form) return;
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      status.textContent = "Salvataggio in corso...";
+      status.className = "text-sm text-nx-gray-dark";
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      // Checkbox: viene incluso solo se selezionato
+      body.publicVisible = fd.has("publicVisible") ? "1" : "0";
+      const btn = form.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/me", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = "Errore: " + (data.error || res.status);
+          status.className = "text-sm text-red-600";
+        } else {
+          status.textContent = "✓ Profilo salvato";
+          status.className = "text-sm text-emerald-600";
+        }
+      } catch (e) {
+        status.textContent = "Errore di rete";
+        status.className = "text-sm text-red-600";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+</script>

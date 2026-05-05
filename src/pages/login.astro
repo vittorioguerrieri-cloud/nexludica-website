@@ -1,0 +1,115 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+export const prerender = false;
+
+const error = Astro.url.searchParams.get("error");
+const errorMessages: Record<string, string> = {
+  "missing-token": "Link non valido.",
+  "invalid-token": "Link scaduto o già usato. Richiedi un nuovo accesso.",
+  backend: "Servizio temporaneamente non disponibile.",
+};
+const errorMsg = error ? errorMessages[error] ?? "Errore non riconosciuto." : null;
+
+// Se l'utente e' gia' loggato, redirect.
+const user = (Astro.locals as any).user;
+if (user) {
+  return Astro.redirect("/area-soci");
+}
+---
+
+<BaseLayout title="Accedi — NexLudica APS" description="Accesso area soci NexLudica con magic link via email.">
+  <section class="bg-nx-off-white px-4 pb-16 pt-28">
+    <div class="mx-auto max-w-md">
+      <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Area Soci</p>
+      <h1 class="mt-4 text-4xl font-black tracking-tight text-nx-dark sm:text-5xl" style="font-family: var(--font-display);">
+        Accedi
+      </h1>
+      <p class="mt-4 text-base text-nx-gray-dark">
+        Inserisci la tua email da socio: ti invieremo un link per accedere.
+        Niente password, scade dopo 15 minuti.
+      </p>
+
+      {errorMsg && (
+        <div class="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          {errorMsg}
+        </div>
+      )}
+
+      <form id="login-form" class="mt-8 space-y-4">
+        <div>
+          <label for="email" class="block text-sm font-medium text-nx-dark">Email</label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            required
+            autocomplete="email"
+            placeholder="tua.email@nexludica.org"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-3 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full rounded-lg bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50"
+        >
+          Invia il link
+        </button>
+      </form>
+
+      <div id="login-result" class="mt-6 hidden rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+        Email inviata. Controlla la posta e clicca il link entro 15 minuti.
+      </div>
+      <div id="login-error" class="mt-6 hidden rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"></div>
+
+      <p class="mt-8 text-xs text-nx-gray-dark">
+        Sei un nuovo socio o hai problemi ad accedere? Scrivi a
+        <a href="mailto:info@nexludica.org" class="text-nx-cyan no-underline hover:underline">info@nexludica.org</a>.
+      </p>
+    </div>
+  </section>
+</BaseLayout>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("login-form");
+    const ok = document.getElementById("login-result");
+    const err = document.getElementById("login-error");
+    if (!form) return;
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      ok.classList.add("hidden");
+      err.classList.add("hidden");
+      const fd = new FormData(form);
+      const email = String(fd.get("email") || "").trim();
+      const btn = form.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/auth/request-link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          err.textContent = data.error || "Errore durante l'invio.";
+          err.classList.remove("hidden");
+        } else {
+          ok.classList.remove("hidden");
+          if (data.devLink) {
+            const dev = document.createElement("p");
+            dev.className = "mt-3 text-xs font-mono text-emerald-900";
+            dev.innerHTML = "Dev link: <a href=\"" + data.devLink + "\" class=\"underline\">" + data.devLink + "</a>";
+            ok.appendChild(dev);
+          }
+          form.reset();
+        }
+      } catch (e) {
+        err.textContent = "Errore di rete: " + (e && e.message ? e.message : e);
+        err.classList.remove("hidden");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+</script>

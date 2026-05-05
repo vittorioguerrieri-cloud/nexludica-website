@@ -1,219 +1,113 @@
 ---
-import BaseLayout from "../layouts/BaseLayout.astro";
+import AreaSociLayout from "../layouts/AreaSociLayout.astro";
+import { getDb } from "../server/db";
+import { listMyArticles } from "../server/articles";
+import { getMyProfile } from "../server/profiles";
+
+export const prerender = false;
+
+const user = (Astro.locals as any).user as { id: string; name: string; email: string; role: string } | null;
+// @ts-expect-error
+const env: Env | undefined = Astro.locals?.runtime?.env;
+const db = env ? getDb(env) : null;
+
+let myArticles: Awaited<ReturnType<typeof listMyArticles>> = [];
+let profile: Awaited<ReturnType<typeof getMyProfile>> = null;
+if (db && user) {
+  [myArticles, profile] = await Promise.all([
+    listMyArticles(db, user.id),
+    getMyProfile(db, user.id),
+  ]);
+}
+
+const profileCompleteness = (() => {
+  if (!profile) return 0;
+  const fields: Array<keyof typeof profile> = ["roleLabel", "bio", "skills", "photoUrl"];
+  const filled = fields.filter((f) => profile && profile[f]).length;
+  return Math.round((filled / fields.length) * 100);
+})();
 ---
 
-<BaseLayout title="Area Soci — NexLudica APS" description="Area riservata agli associati NexLudica: gestione profilo, upload resoconti MeetLudica, materiali interni.">
-  <section class="bg-nx-off-white px-4 pb-12 pt-28">
-    <div class="mx-auto max-w-5xl">
-      <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Riservato</p>
-      <h1 class="mt-4 text-5xl font-black tracking-tight text-nx-dark sm:text-6xl" style="font-family: var(--font-display);">
-        Area Soci
-      </h1>
-      <p class="mt-4 max-w-2xl text-lg text-nx-gray-dark">
-        L'area riservata ai soci di NexLudica. Da qui puoi gestire il tuo profilo,
-        caricare documenti per la community e accedere ai materiali interni.
+<AreaSociLayout title="Dashboard — Area Soci" active="dashboard">
+  <!-- Welcome cards -->
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Profilo pubblico</p>
+      <p class="mt-2 text-3xl font-black text-nx-dark">{profileCompleteness}%</p>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Completezza del tuo profilo {profile?.publicVisible ? "(visibile su Chi siamo)" : "(nascosto)"}.
       </p>
+      <a href="/area-soci/profilo" class="mt-4 inline-block text-sm font-semibold text-nx-cyan no-underline hover:underline">
+        Aggiorna →
+      </a>
     </div>
-  </section>
-
-  <!-- Banner stato MVP -->
-  <section class="mx-auto max-w-5xl px-4 pt-8">
-    <div class="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-      <p class="font-semibold">🚧 Area in costruzione</p>
-      <p class="mt-1">
-        Le interfacce qui sotto sono pronte ma il backend di autenticazione e di archiviazione
-        documenti non è ancora collegato. Per ora i form non salvano nulla. Sotto trovi le
-        opzioni tecniche per attivare la versione "vera".
+    <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">I tuoi articoli</p>
+      <p class="mt-2 text-3xl font-black text-nx-dark">{myArticles.length}</p>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Resoconti MeetLudica pubblicati a tuo nome.
       </p>
+      <a href="/area-soci/articoli" class="mt-4 inline-block text-sm font-semibold text-nx-cyan no-underline hover:underline">
+        Gestisci →
+      </a>
     </div>
-  </section>
-
-  <!-- Tab content -->
-  <section class="mx-auto max-w-5xl px-4 py-12">
-    <div class="grid gap-8 lg:grid-cols-[280px_1fr]">
-      <!-- Sidebar -->
-      <aside class="space-y-1">
-        <p class="px-3 pb-2 pt-3 text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Account</p>
-        <a href="#login" class="block rounded-md bg-nx-cyan-light px-3 py-2 text-sm font-semibold text-nx-cyan no-underline">
-          Accedi
-        </a>
-        <a href="#profilo" class="block rounded-md px-3 py-2 text-sm text-nx-gray-dark no-underline hover:bg-nx-off-white">
-          Il mio profilo
-        </a>
-
-        <p class="mt-4 px-3 pb-2 pt-3 text-xs font-bold uppercase tracking-wider text-nx-gray-dark">MeetLudica</p>
-        <a href="#upload-meetludica" class="block rounded-md px-3 py-2 text-sm text-nx-gray-dark no-underline hover:bg-nx-off-white">
-          Carica un resoconto
-        </a>
-        <a href="#i-miei-articoli" class="block rounded-md px-3 py-2 text-sm text-nx-gray-dark no-underline hover:bg-nx-off-white">
-          I miei articoli
-        </a>
-      </aside>
-
-      <!-- Main content -->
-      <main class="space-y-12">
-        <!-- LOGIN -->
-        <section id="login">
-          <h2 class="text-2xl font-bold text-nx-dark">Accedi</h2>
-          <p class="mt-1 text-sm text-nx-gray-dark">Inserisci le credenziali del tuo account socio.</p>
-
-          <form class="mt-6 space-y-4 rounded-xl border border-nx-gray-light/20 bg-white p-6">
-            <div>
-              <label for="login-email" class="block text-sm font-medium text-nx-dark">Email</label>
-              <input
-                type="email"
-                id="login-email"
-                name="email"
-                required
-                class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-              />
-            </div>
-            <div>
-              <label for="login-password" class="block text-sm font-medium text-nx-dark">Password</label>
-              <input
-                type="password"
-                id="login-password"
-                name="password"
-                required
-                class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled
-              class="w-full rounded-lg bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white opacity-60"
-            >
-              Accedi (auth non attiva)
-            </button>
-          </form>
-        </section>
-
-        <!-- UPLOAD RESOCONTO MEETLUDICA -->
-        <section id="upload-meetludica">
-          <h2 class="text-2xl font-bold text-nx-dark">Carica un resoconto MeetLudica</h2>
-          <p class="mt-1 text-sm text-nx-gray-dark">
-            Hai presentato a un MeetLudica? Pubblica qui il tuo resoconto: comparirà
-            nell'archivio della pagina <a href="/meetludica" class="text-nx-cyan no-underline hover:underline">MeetLudica</a>.
-          </p>
-
-          <form class="mt-6 space-y-5 rounded-xl border border-nx-gray-light/20 bg-white p-6">
-            <div class="grid gap-5 sm:grid-cols-2">
-              <div class="sm:col-span-2">
-                <label for="article-title" class="block text-sm font-medium text-nx-dark">Titolo del talk</label>
-                <input
-                  type="text"
-                  id="article-title"
-                  name="title"
-                  placeholder="es. Tabletop Science: gioco e ricerca"
-                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-                />
-              </div>
-              <div>
-                <label for="article-speaker" class="block text-sm font-medium text-nx-dark">Relatore/i</label>
-                <input
-                  type="text"
-                  id="article-speaker"
-                  name="speaker"
-                  placeholder="Nome Cognome"
-                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-                />
-              </div>
-              <div>
-                <label for="article-date" class="block text-sm font-medium text-nx-dark">Data dell'incontro</label>
-                <input
-                  type="date"
-                  id="article-date"
-                  name="date"
-                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-                />
-              </div>
-              <div class="sm:col-span-2">
-                <label for="article-tags" class="block text-sm font-medium text-nx-dark">Tag (separati da virgola)</label>
-                <input
-                  type="text"
-                  id="article-tags"
-                  name="tags"
-                  placeholder="ricerca, design, NEET"
-                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-                />
-              </div>
-              <div class="sm:col-span-2">
-                <label for="article-abstract" class="block text-sm font-medium text-nx-dark">Abstract</label>
-                <textarea
-                  id="article-abstract"
-                  name="abstract"
-                  rows="5"
-                  placeholder="Breve sintesi del talk e dei principali spunti emersi nella discussione."
-                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-                ></textarea>
-              </div>
-              <div class="sm:col-span-2">
-                <label for="article-pdf" class="block text-sm font-medium text-nx-dark">Documento (PDF)</label>
-                <input
-                  type="file"
-                  id="article-pdf"
-                  name="document"
-                  accept="application/pdf"
-                  class="mt-1 block w-full rounded-lg border border-dashed border-nx-gray-light/40 bg-nx-off-white px-4 py-3 text-sm text-nx-dark outline-none file:mr-4 file:rounded-md file:border-0 file:bg-nx-cyan file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-wider file:text-white"
-                />
-                <p class="mt-1 text-xs text-nx-gray-dark">Max 10 MB. Formato consigliato: PDF.</p>
-              </div>
-              <div class="sm:col-span-2">
-                <label for="article-video" class="block text-sm font-medium text-nx-dark">Link registrazione (opzionale)</label>
-                <input
-                  type="url"
-                  id="article-video"
-                  name="videoUrl"
-                  placeholder="https://"
-                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
-                />
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled
-              class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white opacity-60"
-            >
-              Pubblica resoconto (storage non attivo)
-            </button>
-          </form>
-        </section>
-
-        <!-- I MIEI ARTICOLI -->
-        <section id="i-miei-articoli">
-          <h2 class="text-2xl font-bold text-nx-dark">I miei articoli</h2>
-          <p class="mt-1 text-sm text-nx-gray-dark">
-            Qui troverai i resoconti che hai pubblicato e potrai modificarli o eliminarli.
-          </p>
-          <div class="mt-6 rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-nx-off-white p-8 text-center">
-            <p class="text-sm text-nx-gray-dark">Non hai ancora pubblicato resoconti.</p>
-          </div>
-        </section>
-      </main>
-    </div>
-  </section>
-
-  <!-- Nota tecnica per Vittorio -->
-  <section class="border-t border-nx-gray-light/20 bg-nx-off-white px-4 py-12">
-    <div class="mx-auto max-w-3xl text-sm text-nx-gray-dark">
-      <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Nota tecnica</p>
-      <p class="mt-2">
-        Per attivare upload e auth servono 3 risorse Cloudflare (gratuite per i volumi attesi):
+    <div class="rounded-xl border border-nx-gray-light/20 bg-nx-cyan-light p-6">
+      <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Carica un resoconto</p>
+      <p class="mt-2 text-lg font-bold text-nx-dark">Hai presentato a un MeetLudica?</p>
+      <p class="mt-1 text-sm text-nx-dark/80">
+        Pubblica il tuo resoconto: comparirà nell'archivio pubblico.
       </p>
-      <ul class="mt-3 space-y-2">
-        <li class="flex items-start gap-2">
-          <span class="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-nx-cyan"></span>
-          <span><strong class="text-nx-dark">R2</strong> per archiviare i PDF dei resoconti.</span>
-        </li>
-        <li class="flex items-start gap-2">
-          <span class="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-nx-cyan"></span>
-          <span><strong class="text-nx-dark">D1</strong> (SQLite) per metadati articoli e utenti.</span>
-        </li>
-        <li class="flex items-start gap-2">
-          <span class="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-nx-cyan"></span>
-          <span><strong class="text-nx-dark">Cloudflare Access</strong> (o Auth0/Clerk) per il login dei soci.</span>
-        </li>
+      <a href="/area-soci/articoli/nuovo" class="mt-4 inline-block rounded-lg bg-nx-cyan px-5 py-2 text-sm font-bold uppercase tracking-wider text-white no-underline transition hover:bg-nx-blue">
+        Nuovo resoconto
+      </a>
+    </div>
+  </div>
+
+  <!-- Recent activity -->
+  <div class="mt-10">
+    <h2 class="text-xl font-bold text-nx-dark">I tuoi ultimi articoli</h2>
+    {myArticles.length === 0 ? (
+      <div class="mt-4 rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center">
+        <p class="text-sm text-nx-gray-dark">Non hai ancora pubblicato nessun resoconto.</p>
+        <a href="/area-soci/articoli/nuovo" class="mt-3 inline-block text-sm font-semibold text-nx-cyan no-underline hover:underline">
+          Carica il primo →
+        </a>
+      </div>
+    ) : (
+      <ul class="mt-4 space-y-3">
+        {myArticles.slice(0, 5).map((a) => (
+          <li class="flex items-center justify-between gap-4 rounded-lg border border-nx-gray-light/20 bg-white p-4">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-nx-dark">{a.title}</p>
+              <p class="mt-0.5 text-xs text-nx-gray-dark">
+                {a.speaker} · {a.meetingDate} · <span class="uppercase">{a.status}</span>
+              </p>
+            </div>
+            <a href={`/area-soci/articoli`} class="text-xs font-semibold text-nx-cyan no-underline hover:underline">Gestisci</a>
+          </li>
+        ))}
       </ul>
+    )}
+  </div>
+
+  <!-- Quick links -->
+  <div class="mt-10 rounded-xl border border-nx-gray-light/20 bg-nx-off-white p-6">
+    <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Risorse rapide</p>
+    <div class="mt-4 grid gap-3 sm:grid-cols-2">
+      <a href="/area-soci/verbali" class="flex items-center gap-3 rounded-lg bg-white p-4 no-underline transition hover:shadow-md">
+        <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-nx-cyan-light text-nx-cyan">▤</span>
+        <div>
+          <p class="text-sm font-semibold text-nx-dark">Verbali e documenti</p>
+          <p class="text-xs text-nx-gray-dark">Cartella Drive con verbali assemblee, statuto e atti</p>
+        </div>
+      </a>
+      <a href="/meetludica" class="flex items-center gap-3 rounded-lg bg-white p-4 no-underline transition hover:shadow-md">
+        <span class="flex h-10 w-10 items-center justify-center rounded-lg bg-nx-cyan-light text-nx-cyan">★</span>
+        <div>
+          <p class="text-sm font-semibold text-nx-dark">Pagina MeetLudica</p>
+          <p class="text-xs text-nx-gray-dark">Calendario incontri e archivio resoconti pubblici</p>
+        </div>
+      </a>
     </div>
-  </section>
-</BaseLayout>
+  </div>
+</AreaSociLayout>
