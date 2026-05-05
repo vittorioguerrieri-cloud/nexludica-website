@@ -1,17 +1,26 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-// build: 2026-05-05T15:40Z (force cache invalidation)
+
+const partners = [
+  { name: "Università di Milano-Bicocca", role: "Ricerca scientifica" },
+  { name: "Centro di Solidarietà di Genova", role: "Territorio" },
+  { name: "Istituto Tecnologie Didattiche — CNR", role: "Ricerca didattica" },
+  { name: "Centro di Ricerca sul Gioco", role: "Network scientifico" },
+  { name: "Acquedotti", role: "Game design" },
+  { name: "Fondazione Cariplo", role: "Co-finanziamento" },
+];
 ---
 
-<BaseLayout title="NexLudica APS — Cultura ludica e inclusione sociale">
+<BaseLayout title="NexLudica APS — Cultura ludica per l'inclusione sociale">
   <!-- Hero -->
   <section class="nx-hero-pattern px-4 pb-20 pt-28 text-center">
     <h1 class="mx-auto max-w-3xl text-4xl font-extrabold leading-tight text-nx-dark md:text-5xl lg:text-6xl" style="font-family: var(--font-display);">
-      Cultura ludica per l'inclusione sociale
+      Il gioco come strumento di trasformazione sociale
     </h1>
     <p class="mx-auto mt-6 max-w-2xl text-lg text-nx-gray-dark">
-      NexLudica è un'associazione di promozione sociale che utilizza il gioco come strumento di
-      connessione, educazione e crescita comunitaria.
+      Giocare è molto più che un passatempo: è un'esperienza che coinvolge mente e relazioni.
+      NexLudica esplora il potenziale del gioco da tavolo per il benessere, l'inclusione
+      e lo sviluppo di competenze trasversali.
     </p>
     <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
       <a
@@ -33,29 +42,51 @@ import BaseLayout from "../layouts/BaseLayout.astro";
   <section class="mx-auto max-w-6xl px-4 py-20">
     <h2 class="text-center text-3xl font-bold text-nx-dark">Cosa facciamo</h2>
     <p class="mx-auto mt-4 max-w-2xl text-center text-nx-gray-dark">
-      Promuoviamo la cultura ludica come veicolo di inclusione, educazione e partecipazione attiva.
+      Combiniamo ricerca scientifica, sperimentazione sul campo e progettazione partecipata
+      per attivare risorse e creare connessioni nei contesti sociali.
     </p>
     <div class="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
       <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
         <img src="/images/branding/die-1.svg" alt="" class="mb-4 h-16 w-auto" loading="lazy" />
-        <h3 class="text-lg font-semibold text-nx-dark">Eventi ludici</h3>
+        <h3 class="text-lg font-semibold text-nx-dark">Game</h3>
         <p class="mt-2 text-sm text-nx-gray-dark">
-          Organizziamo serate di gioco da tavolo e gioco di ruolo aperte a tutti, in diverse sedi sul territorio.
+          Eventi ludici aperti a tutti: serate di gioco da tavolo e gioco di ruolo
+          per riconnettere il tessuto sociale.
         </p>
       </div>
       <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
         <img src="/images/branding/die-2.svg" alt="" class="mb-4 h-16 w-auto" loading="lazy" />
-        <h3 class="text-lg font-semibold text-nx-dark">Inclusione sociale</h3>
+        <h3 class="text-lg font-semibold text-nx-dark">Research</h3>
         <p class="mt-2 text-sm text-nx-gray-dark">
-          Il gioco come strumento per abbattere barriere, creare connessioni e costruire comunità.
+          Studiamo il ruolo motivazionale e psicologico del gioco da tavolo, in
+          collaborazione con università ed enti di ricerca.
         </p>
       </div>
       <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
         <img src="/images/branding/die-3.svg" alt="" class="mb-4 h-16 w-auto" loading="lazy" />
-        <h3 class="text-lg font-semibold text-nx-dark">Ricerca e formazione</h3>
+        <h3 class="text-lg font-semibold text-nx-dark">Inclusion</h3>
         <p class="mt-2 text-sm text-nx-gray-dark">
-          Studiamo l'impatto sociale del gioco e formiamo educatori, volontari e professionisti.
+          Progettiamo interventi inclusivi per giovani NEET, persone in carcere
+          e contesti fragili attraverso il gioco.
         </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Partner -->
+  <section class="bg-nx-off-white px-4 py-20">
+    <div class="mx-auto max-w-6xl">
+      <h2 class="text-center text-3xl font-bold text-nx-dark">I nostri partner</h2>
+      <p class="mx-auto mt-4 max-w-2xl text-center text-nx-gray-dark">
+        Lavoriamo con università, enti di ricerca e realtà del terzo settore.
+      </p>
+      <div class="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {partners.map((p) => (
+          <div class="rounded-lg border border-nx-gray-light/20 bg-white p-5">
+            <p class="text-base font-semibold text-nx-dark">{p.name}</p>
+            <p class="mt-1 text-xs uppercase tracking-wider text-nx-cyan">{p.role}</p>
+          </div>
+        ))}
       </div>
     </div>
   </section>

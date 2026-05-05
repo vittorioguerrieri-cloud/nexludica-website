@@ -1,14 +1,29 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+
+const team = [
+  { name: "Vittorio Guerrieri", skills: "Psicometria · Game design · Lavoro sociale" },
+  { name: "Raluca Fulgu", skills: "Psicologia sociale · Ricerca · Inclusione" },
+  { name: "Mattia Drago", skills: "Gioco da tavolo · Imprenditoria · Fitness" },
+  { name: "Marco Monteverde", skills: "Game design · Informatica · Comunicazione" },
+  { name: "Simone Glogowschek", skills: "Game design · Matematica · Insegnamento" },
+  { name: "Camilla Fadda", skills: "Concept art · Social · Storytelling" },
+  { name: "Maria Pulinas", skills: "Impegno sociale · Carcere · Linguistica" },
+  { name: "Elisa Scialabba", skills: "Pedagogia · Social studies · Formazione" },
+  { name: "Camilla Merola", skills: "Digital humanities · AI · Logistica" },
+  { name: "Davide Langella", skills: "Logistica · Catering · Budgeting" },
+  { name: "Irene Ferraresi", skills: "Illustrazione · Grafica · Game testing" },
+];
 ---
 
-<BaseLayout title="Chi siamo — NexLudica APS" description="Scopri chi è NexLudica, la nostra storia, missione e il team che porta avanti i progetti.">
+<BaseLayout title="Chi siamo — NexLudica APS" description="NexLudica APS: associazione che usa il gioco da tavolo per ricerca, inclusione e formazione. Mission, valori e team.">
   <section class="nx-hero-pattern px-4 pb-16 pt-28 text-center">
     <h1 class="text-4xl font-extrabold text-nx-dark md:text-5xl" style="font-family: var(--font-display);">
       Chi siamo
     </h1>
     <p class="mx-auto mt-4 max-w-2xl text-lg text-nx-gray-dark">
-      Un'associazione nata dalla passione per il gioco e dalla convinzione che possa cambiare le cose.
+      Un gruppo di appassionati di gioco da tavolo, ricercatori, artisti e game designer
+      che credono nel potere formativo, sociale e motivazionale del gioco.
     </p>
   </section>
 
@@ -17,58 +32,72 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <div>
         <h2 class="text-2xl font-bold text-nx-dark">La nostra missione</h2>
         <p class="mt-4 text-nx-gray-dark leading-relaxed">
-          NexLudica APS nasce con l'obiettivo di promuovere la cultura ludica come strumento di
-          inclusione sociale, educazione e partecipazione attiva. Crediamo che il gioco — da tavolo,
-          di ruolo, e in tutte le sue forme — sia un linguaggio universale capace di creare ponti tra
-          le persone, abbattere barriere e costruire comunità più coese.
+          Giocare è molto più che un passatempo: è un'esperienza che coinvolge mente e
+          relazioni. NexLudica nasce per esplorare il potenziale trasformativo del gioco
+          da tavolo come strumento per promuovere il benessere psicologico, favorire
+          l'inclusione sociale e sviluppare competenze trasversali.
+        </p>
+        <p class="mt-4 text-nx-gray-dark leading-relaxed">
+          Il nostro approccio combina <strong class="text-nx-dark">ricerca scientifica</strong>,
+          <strong class="text-nx-dark">sperimentazione sul campo</strong> e
+          <strong class="text-nx-dark">progettazione partecipata</strong>: il gioco viene
+          concepito come strumento per attivare risorse, creare connessioni e immaginare
+          nuove possibilità nei contesti sociali.
         </p>
       </div>
 
       <div>
-        <h2 class="text-2xl font-bold text-nx-dark">I nostri valori</h2>
+        <h2 class="text-2xl font-bold text-nx-dark">I tre pilastri</h2>
         <ul class="mt-4 space-y-3">
           <li class="flex items-start gap-3">
-            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">1</span>
+            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">G</span>
             <div>
-              <strong class="text-nx-dark">Inclusione</strong>
-              <span class="text-nx-gray-dark"> — Ogni persona è benvenuta, indipendentemente da età, provenienza o esperienza.</span>
+              <strong class="text-nx-dark">Game</strong>
+              <span class="text-nx-gray-dark"> — Il gioco da tavolo come pratica culturale, esperienza sociale e linguaggio universale.</span>
             </div>
           </li>
           <li class="flex items-start gap-3">
-            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">2</span>
+            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">R</span>
             <div>
-              <strong class="text-nx-dark">Comunità</strong>
-              <span class="text-nx-gray-dark"> — Costruiamo relazioni autentiche attraverso esperienze condivise.</span>
+              <strong class="text-nx-dark">Research</strong>
+              <span class="text-nx-gray-dark"> — Ricerca scientifica sull'impatto psicologico, sociale e formativo del gioco.</span>
             </div>
           </li>
           <li class="flex items-start gap-3">
-            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">3</span>
+            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">I</span>
             <div>
-              <strong class="text-nx-dark">Trasparenza</strong>
-              <span class="text-nx-gray-dark"> — Operiamo in modo aperto e rendicontiamo il nostro impatto.</span>
-            </div>
-          </li>
-          <li class="flex items-start gap-3">
-            <span class="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">4</span>
-            <div>
-              <strong class="text-nx-dark">Innovazione sociale</strong>
-              <span class="text-nx-gray-dark"> — Sperimentiamo nuove metodologie e misuriamo il loro impatto.</span>
+              <strong class="text-nx-dark">Inclusion</strong>
+              <span class="text-nx-gray-dark"> — Interventi pensati per persone NEET, contesti detentivi, scuole e gruppi fragili.</span>
             </div>
           </li>
         </ul>
       </div>
 
       <div>
+        <h2 class="text-2xl font-bold text-nx-dark">Il team</h2>
+        <p class="mt-4 text-nx-gray-dark leading-relaxed">
+          Soci e collaboratori di NexLudica con le rispettive aree di competenza.
+        </p>
+        <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {team.map((p) => (
+            <div class="rounded-lg border border-nx-gray-light/20 bg-white p-4">
+              <p class="text-base font-semibold text-nx-dark">{p.name}</p>
+              <p class="mt-1 text-xs text-nx-gray-dark">{p.skills}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
         <h2 class="text-2xl font-bold text-nx-dark">L'associazione</h2>
         <p class="mt-4 text-nx-gray-dark leading-relaxed">
-          NexLudica è un'Associazione di Promozione Sociale (APS) iscritta al RUNTS con sede a Genova.
-          Operiamo sul territorio ligure attraverso eventi, laboratori e progetti che coinvolgono
-          centinaia di persone ogni anno.
+          NexLudica è un'Associazione di Promozione Sociale (APS) con sede a Genova.
+          Operiamo sul territorio nazionale attraverso progetti, eventi e ricerca.
         </p>
         <div class="mt-6 rounded-lg border border-nx-gray-light/20 bg-nx-off-white p-6">
           <dl class="grid gap-4 sm:grid-cols-2">
             <div>
-              <dt class="text-xs font-semibold uppercase text-nx-gray-dark">Codice Fiscale</dt>
+              <dt class="text-xs font-semibold uppercase text-nx-gray-dark">Codice fiscale</dt>
               <dd class="mt-1 text-sm font-medium text-nx-dark">95252550108</dd>
             </div>
             <div>

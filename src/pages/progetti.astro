@@ -3,31 +3,43 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 const progetti = [
   {
+    title: "Wanderer's Quest",
+    tagline: "Ricerca · Giovani NEET",
+    status: "In corso",
+    description: "Iniziativa di ricerca che usa il gioco da tavolo come strumento di trasformazione sociale per giovani NEET (Not in Education, Employment, or Training). Il progetto interpreta questa fase di transizione come un viaggio di esplorazione personale e analizza come il gioco possa promuovere fiducia, socializzazione e competenze trasversali.",
+    partners: ["Università di Milano-Bicocca"],
+    objectives: [
+      "Approfondire il ruolo motivazionale e psicologico del gioco da tavolo nei giovani NEET",
+      "Analizzare come il gioco da tavolo promuova fiducia, socializzazione e competenze trasversali",
+      "Sviluppare un intervento standardizzato e replicabile per enti del terzo settore",
+    ],
+  },
+  {
     title: "Giochi al Pesto",
-    description: "Serate di gioco da tavolo e gioco di ruolo gratuite e aperte a tutti, in diverse sedi della città metropolitana di Genova. Il progetto bandiera di NexLudica per l'inclusione sociale attraverso il gioco.",
+    tagline: "Eventi · Inclusione · Genova",
     status: "Attivo",
+    description: "Serate di gioco da tavolo e gioco di ruolo gratuite e aperte a tutti, in diverse sedi della città metropolitana di Genova. Il progetto bandiera di NexLudica per riconnettere il tessuto sociale giovanile attraverso il gioco.",
+    partners: ["Centro di Solidarietà di Genova"],
     link: "https://giochialpesto.it",
   },
   {
-    title: "Formazione educatori",
-    description: "Percorsi formativi per educatori, insegnanti e animatori sull'uso del gioco come strumento pedagogico e di inclusione.",
+    title: "MeetLudica",
+    tagline: "Network scientifico",
     status: "Attivo",
-  },
-  {
-    title: "Ricerca impatto sociale",
-    description: "Studio e valutazione dell'impatto sociale delle attività ludiche sulla comunità, con pubblicazione di report e articoli scientifici.",
-    status: "In corso",
+    description: "Incontro mensile online che riunisce ricercatori sul gioco da tavolo. Ogni ultimo giovedì del mese alle 20:30: 30 minuti di presentazione di un progetto di ricerca in corso, seguiti da un'ora di confronto e discussione. L'iniziativa mira a rendere la ricerca ludica più accessibile e a favorire la connessione tra ricercatrici e ricercatori.",
+    partners: [],
   },
 ];
 ---
 
-<BaseLayout title="Progetti — NexLudica APS" description="I progetti di NexLudica: eventi ludici, formazione, ricerca e inclusione sociale attraverso il gioco.">
+<BaseLayout title="Progetti — NexLudica APS" description="I progetti di NexLudica: Wanderer's Quest, Giochi al Pesto, MeetLudica. Ricerca, eventi e inclusione attraverso il gioco da tavolo.">
   <section class="nx-hero-pattern px-4 pb-16 pt-28 text-center">
     <h1 class="text-4xl font-extrabold text-nx-dark md:text-5xl" style="font-family: var(--font-display);">
       I nostri progetti
     </h1>
     <p class="mx-auto mt-4 max-w-2xl text-lg text-nx-gray-dark">
-      Dall'organizzazione di eventi alla ricerca scientifica: ecco come portiamo avanti la nostra missione.
+      Dalla ricerca scientifica agli eventi sul territorio: ecco come portiamo
+      avanti la nostra missione.
     </p>
   </section>
 
@@ -36,8 +48,11 @@ const progetti = [
       {progetti.map((progetto) => (
         <article class="rounded-xl border border-nx-gray-light/20 bg-white p-8 shadow-sm transition hover:shadow-md">
           <div class="flex flex-wrap items-start justify-between gap-4">
-            <h2 class="text-2xl font-bold text-nx-dark">{progetto.title}</h2>
-            <span class={`rounded-full px-3 py-1 text-xs font-semibold ${
+            <div>
+              <h2 class="text-2xl font-bold text-nx-dark">{progetto.title}</h2>
+              <p class="mt-1 text-xs uppercase tracking-wider text-nx-cyan">{progetto.tagline}</p>
+            </div>
+            <span class={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${
               progetto.status === "Attivo"
                 ? "bg-emerald-100 text-emerald-700"
                 : "bg-amber-100 text-amber-700"
@@ -46,6 +61,31 @@ const progetti = [
             </span>
           </div>
           <p class="mt-4 text-nx-gray-dark leading-relaxed">{progetto.description}</p>
+          {progetto.objectives && (
+            <div class="mt-4">
+              <p class="text-sm font-semibold text-nx-dark">Obiettivi</p>
+              <ul class="mt-2 space-y-1">
+                {progetto.objectives.map((o) => (
+                  <li class="flex items-start gap-2 text-sm text-nx-gray-dark">
+                    <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-nx-cyan"></span>
+                    <span>{o}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {progetto.partners && progetto.partners.length > 0 && (
+            <div class="mt-4">
+              <p class="text-sm font-semibold text-nx-dark">In collaborazione con</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                {progetto.partners.map((p) => (
+                  <span class="rounded-full bg-nx-off-white px-3 py-1 text-xs text-nx-gray-dark">
+                    {p}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {progetto.link && (
             <a
               href={progetto.link}

@@ -13,13 +13,20 @@ const navItems = [
 
 <header id="site-header" class="site-header sticky top-0 z-40">
   <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-    <a href="/" class="header-brand flex items-center no-underline" aria-label="NexLudica - home">
-      <img
-        src="/images/branding/logo-horizontal.svg"
-        alt="NexLudica"
-        class="h-10 w-auto sm:h-12"
-        loading="eager"
-      />
+    <a href="/" class="header-brand flex items-center gap-3 no-underline" aria-label="NexLudica - home">
+      <span class="brand-dice flex flex-col items-center justify-center gap-0.5">
+        <img src="/images/branding/die-1.svg" alt="" class="h-3.5 w-auto" loading="eager" />
+        <img src="/images/branding/die-2.svg" alt="" class="h-3.5 w-auto" loading="eager" />
+        <img src="/images/branding/die-3.svg" alt="" class="h-3.5 w-auto" loading="eager" />
+      </span>
+      <span class="flex flex-col leading-none">
+        <span class="brand-wordmark text-2xl font-extrabold tracking-tight sm:text-3xl">
+          <span class="text-nx-cyan">Nex</span><span class="brand-ludica">Ludica</span>
+        </span>
+        <span class="brand-tagline mt-1 text-[9px] tracking-[0.2em] text-nx-gray-dark sm:text-[10px]">
+          Game | Research | Inclusion
+        </span>
+      </span>
     </a>
     <nav class="hidden md:block">
       <ul class="flex items-center gap-7 text-sm">
@@ -69,16 +76,21 @@ const navItems = [
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
   }
 
-  /*
-   * Quando l'header e' scrolled (sfondo scuro), il logo SVG (cyan + dark) puo'
-   * sparire sul nero: usiamo un filter brightness per renderlo bianco/cyan piu' chiaro.
-   */
-  .header-brand img {
-    transition: filter 0.25s ease;
+  /* Wordmark: "Nex" e' gia' cyan via Tailwind, "Ludica" e tagline cambiano col tema */
+  .brand-ludica {
+    color: var(--color-nx-dark);
+    transition: color 0.25s ease;
   }
-  .site-header.is-scrolled .header-brand img {
-    filter: brightness(0) invert(1);
+  .brand-tagline {
+    transition: color 0.25s ease;
   }
+  .site-header.is-scrolled .brand-ludica {
+    color: white;
+  }
+  .site-header.is-scrolled .brand-tagline {
+    color: rgba(255, 255, 255, 0.7);
+  }
+  /* I dadi sono cyan (#05abc4), restano visibili sia su bianco che su dark */
 
   .header-link {
     color: var(--color-nx-gray-dark);
