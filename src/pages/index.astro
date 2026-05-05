@@ -36,40 +36,62 @@ const partners = [
 ---
 
 <BaseLayout title="NexLudica APS — Cultura ludica per l'inclusione sociale">
-  <!-- Hero -->
-  <section class="nx-hero-pattern px-4 pb-20 pt-20">
-    <div class="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2">
-      <div class="text-center lg:text-left">
-        <h1 class="text-4xl font-extrabold leading-tight text-nx-dark md:text-5xl lg:text-5xl xl:text-6xl" style="font-family: var(--font-display);">
-          Il gioco come strumento di trasformazione sociale
-        </h1>
-        <p class="mt-6 text-lg text-nx-gray-dark">
-          Giocare è molto più che un passatempo: è un'esperienza che coinvolge
-          mente e relazioni. NexLudica esplora il potenziale del gioco da tavolo
-          per il benessere, l'inclusione e lo sviluppo di competenze trasversali.
+  <!-- Hero audace: tipografia gigante + blocco cyan + dado grande -->
+  <section class="relative overflow-hidden bg-nx-off-white px-4 pb-24 pt-24 lg:pb-32 lg:pt-32">
+    <!-- Blocco cyan diagonale come accento di sfondo -->
+    <div class="pointer-events-none absolute -right-24 top-1/2 h-[500px] w-[500px] -translate-y-1/2 rotate-12 bg-nx-cyan/10 lg:h-[700px] lg:w-[700px]"></div>
+    <!-- Dado gigante semi-trasparente decorativo -->
+    <img
+      src="/images/branding/die-3.svg"
+      alt=""
+      aria-hidden="true"
+      class="pointer-events-none absolute -right-10 top-10 h-48 w-auto opacity-20 lg:right-40 lg:top-20 lg:h-64"
+    />
+
+    <div class="relative mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2">
+      <div>
+        <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">
+          Game · Research · Inclusion
         </p>
-        <div class="mt-8 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
+        <h1 class="mt-6 text-5xl font-black leading-[1.05] tracking-tight text-nx-dark sm:text-6xl lg:text-7xl xl:text-[5.5rem]" style="font-family: var(--font-display);">
+          Il gioco<br />
+          <span class="relative inline-block">
+            <span class="relative z-10">trasforma</span>
+            <span class="absolute inset-x-0 bottom-1 -z-0 h-4 bg-nx-cyan/30 lg:bottom-2 lg:h-6"></span>
+          </span>
+          <br />
+          la società.
+        </h1>
+        <p class="mt-8 max-w-xl text-lg leading-relaxed text-nx-gray-dark">
+          NexLudica esplora il potenziale del gioco da tavolo per il benessere,
+          l'inclusione e lo sviluppo di competenze trasversali.
+        </p>
+        <div class="mt-10 flex flex-wrap items-center gap-4">
           <a
             href="/progetti"
-            class="inline-block rounded-lg bg-nx-cyan px-6 py-3 text-sm font-semibold text-white no-underline shadow-md transition hover:bg-nx-blue"
+            class="inline-block rounded-lg bg-nx-cyan px-7 py-3.5 text-sm font-bold uppercase tracking-wider text-white no-underline shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue hover:shadow-xl"
           >
             Scopri i progetti
           </a>
           <a
             href="/supportaci"
-            class="inline-block rounded-lg border-2 border-nx-cyan px-6 py-3 text-sm font-semibold text-nx-cyan no-underline transition hover:bg-nx-cyan hover:text-white"
+            class="inline-block border-b-2 border-nx-dark px-2 py-2 text-sm font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
           >
-            Supportaci
+            Supportaci →
           </a>
         </div>
       </div>
       <div class="hidden lg:block">
-        <img
-          src="/images/community.png"
-          alt="Momenti dalla comunità NexLudica"
-          class="mx-auto w-full max-w-md"
-          loading="eager"
-        />
+        <div class="relative">
+          <!-- Grande blocco cyan offsettato dietro l'immagine -->
+          <div class="absolute -right-6 -top-6 h-full w-full bg-nx-cyan"></div>
+          <img
+            src="/images/community.png"
+            alt="Momenti dalla comunità NexLudica"
+            class="relative z-10 w-full"
+            loading="eager"
+          />
+        </div>
       </div>
     </div>
   </section>
