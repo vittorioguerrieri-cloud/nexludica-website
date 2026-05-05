@@ -183,17 +183,21 @@ export function readSessionCookie(request: Request): string | null {
 }
 
 /**
- * Helper Astro: carica l'utente dal cookie e lo mette in Astro.locals.user.
- * Usato dal middleware per ogni request.
+ * Helper Astro: carica l'utente dal cookie. Difensivo: ritorna null su
+ * qualunque errore (env mancante, DB binding mancante, query fallita).
  */
 export async function loadUserFromContext(ctx: APIContext): Promise<SessionUser | null> {
-  // @ts-expect-error - env esposta da @astrojs/cloudflare in ctx.locals.runtime.env
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
-  if (!db) return null;
-  const sid = readSessionCookie(ctx.request);
-  if (!sid) return null;
-  return await loadSessionUser(db, sid);
+  try {
+    const sid = readSessionCookie(ctx.request);
+    if (!sid) return null;
+    // @ts-expect-error - env esposta da @astrojs/cloudflare in ctx.locals.runtime.env
+    const env: Env | undefined = ctx.locals?.runtime?.env;
+    const db = env ? getDb(env) : null;
+    if (!db) return null;
+    return await loadSessionUser(db, sid);
+  } catch {
+    return null;
+  }
 }
 
 /**

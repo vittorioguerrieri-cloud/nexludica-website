@@ -1,5 +1,6 @@
 ---
 import BaseLayout from "./BaseLayout.astro";
+import { getUser } from "../server/guards";
 
 export interface Props {
   title?: string;
@@ -7,11 +8,7 @@ export interface Props {
 }
 const { title = "Area Soci — NexLudica APS", active = "dashboard" } = Astro.props;
 
-const user = (Astro.locals as any).user as
-  | { id: string; email: string; name: string; role: string }
-  | null
-  | undefined;
-
+const user = await getUser(Astro);
 if (!user) {
   return Astro.redirect("/login");
 }

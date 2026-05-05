@@ -2,14 +2,25 @@
 import AreaSociLayout from "../../layouts/AreaSociLayout.astro";
 import { getDb } from "../../server/db";
 import { getMyProfile } from "../../server/profiles";
+import { getUser } from "../../server/guards";
 
 export const prerender = false;
 
-const user = (Astro.locals as any).user as { id: string; name: string; email: string; role: string } | null;
+const user = await getUser(Astro);
+if (!user) {
+  return Astro.redirect("/login");
+}
 // @ts-expect-error
 const env: Env | undefined = Astro.locals?.runtime?.env;
 const db = env ? getDb(env) : null;
-const profile = (db && user) ? await getMyProfile(db, user.id) : null;
+let profile: Awaited<ReturnType<typeof getMyProfile>> = null;
+if (db) {
+  try {
+    profile = await getMyProfile(db, user.id);
+  } catch (e) {
+    console.error("[profilo] db error:", e);
+  }
+}
 ---
 
 <AreaSociLayout title="Il mio profilo — Area Soci" active="profilo">

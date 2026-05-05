@@ -1,5 +1,6 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import { getUser } from "../server/guards";
 
 export const prerender = false;
 
@@ -12,7 +13,7 @@ const errorMessages: Record<string, string> = {
 const errorMsg = error ? errorMessages[error] ?? "Errore non riconosciuto." : null;
 
 // Se l'utente e' gia' loggato, redirect.
-const user = (Astro.locals as any).user;
+const user = await getUser(Astro);
 if (user) {
   return Astro.redirect("/area-soci");
 }

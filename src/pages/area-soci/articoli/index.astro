@@ -2,14 +2,25 @@
 import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
 import { getDb } from "../../../server/db";
 import { listMyArticles } from "../../../server/articles";
+import { getUser } from "../../../server/guards";
 
 export const prerender = false;
 
-const user = (Astro.locals as any).user as { id: string; name: string } | null;
+const user = await getUser(Astro);
+if (!user) {
+  return Astro.redirect("/login");
+}
 // @ts-expect-error
 const env: Env | undefined = Astro.locals?.runtime?.env;
 const db = env ? getDb(env) : null;
-const articles = (db && user) ? await listMyArticles(db, user.id) : [];
+let articles: Awaited<ReturnType<typeof listMyArticles>> = [];
+if (db) {
+  try {
+    articles = await listMyArticles(db, user.id);
+  } catch (e) {
+    console.error("[articoli] db error:", e);
+  }
+}
 ---
 
 <AreaSociLayout title="I miei articoli — Area Soci" active="articoli">

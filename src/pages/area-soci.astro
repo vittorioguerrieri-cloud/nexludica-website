@@ -3,21 +3,29 @@ import AreaSociLayout from "../layouts/AreaSociLayout.astro";
 import { getDb } from "../server/db";
 import { listMyArticles } from "../server/articles";
 import { getMyProfile } from "../server/profiles";
+import { getUser } from "../server/guards";
 
 export const prerender = false;
 
-const user = (Astro.locals as any).user as { id: string; name: string; email: string; role: string } | null;
+const user = await getUser(Astro);
+if (!user) {
+  return Astro.redirect("/login");
+}
 // @ts-expect-error
 const env: Env | undefined = Astro.locals?.runtime?.env;
 const db = env ? getDb(env) : null;
 
 let myArticles: Awaited<ReturnType<typeof listMyArticles>> = [];
 let profile: Awaited<ReturnType<typeof getMyProfile>> = null;
-if (db && user) {
-  [myArticles, profile] = await Promise.all([
-    listMyArticles(db, user.id),
-    getMyProfile(db, user.id),
-  ]);
+if (db) {
+  try {
+    [myArticles, profile] = await Promise.all([
+      listMyArticles(db, user.id),
+      getMyProfile(db, user.id),
+    ]);
+  } catch (e) {
+    console.error("[area-soci] db error:", e);
+  }
 }
 
 const profileCompleteness = (() => {
