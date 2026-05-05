@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+@theme {
+  /* NexLudica brand palette */
+  --color-nx-cyan: #05abc4;
+  --color-nx-cyan-light: #e0f7fa;
+  --color-nx-blue: #286181;
+  --color-nx-blue-deep: #1a3d5c;
+  --color-nx-dark: #1b2528;
+  --color-nx-gray-light: #b4b4b4;
+  --color-nx-gray-dark: #657179;
+  --color-nx-white: #ffffff;
+  --color-nx-off-white: #f8fafb;
+
+  /* Accent */
+  --color-nx-accent: #f59e0b;
+  --color-nx-accent-soft: #fef3c7;
+
+  /* Font stacks */
+  --font-display: "Montserrat", system-ui, -apple-system, sans-serif;
+  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+html {
+  font-family: var(--font-body);
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--color-nx-white);
+  color: var(--color-nx-dark);
+}
+
+.nx-hero-pattern {
+  background-color: var(--color-nx-off-white);
+  background-image:
+    radial-gradient(circle at 10% 25%, rgba(5, 171, 196, 0.08) 0, rgba(5, 171, 196, 0.08) 80px, transparent 81px),
+    radial-gradient(circle at 90% 20%, rgba(40, 97, 129, 0.06) 0, rgba(40, 97, 129, 0.06) 100px, transparent 101px),
+    radial-gradient(circle at 20% 80%, rgba(5, 171, 196, 0.06) 0, rgba(5, 171, 196, 0.06) 60px, transparent 61px),
+    radial-gradient(circle at 85% 75%, rgba(40, 97, 129, 0.08) 0, rgba(40, 97, 129, 0.08) 90px, transparent 91px);
+}

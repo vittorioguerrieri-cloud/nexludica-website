@@ -1,0 +1,144 @@
+---
+const { pathname } = Astro.url;
+
+const navItems = [
+  { href: "/", label: "Home", match: (p: string) => p === "/" },
+  { href: "/chi-siamo", label: "Chi siamo", match: (p: string) => p.startsWith("/chi-siamo") },
+  { href: "/progetti", label: "Progetti", match: (p: string) => p.startsWith("/progetti") },
+  { href: "/supportaci", label: "Supportaci", match: (p: string) => p.startsWith("/supportaci") },
+  { href: "/contattaci", label: "Contattaci", match: (p: string) => p.startsWith("/contattaci") },
+  { href: "/area-soci", label: "Area Soci", match: (p: string) => p.startsWith("/area-soci") },
+];
+---
+
+<header id="site-header" class="site-header sticky top-0 z-40">
+  <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+    <a href="/" class="header-brand flex items-center gap-2.5 no-underline">
+      <img
+        src="/images/branding/logo-mark.svg"
+        alt=""
+        width="36"
+        height="36"
+        class="h-9 w-9"
+        loading="eager"
+      />
+      <div class="flex flex-col">
+        <span class="header-brand-text text-lg font-bold leading-tight tracking-tight">
+          <span class="text-nx-cyan">Nex</span>Ludica
+        </span>
+        <span class="header-tagline hidden text-[10px] tracking-widest text-nx-gray-dark sm:block">
+          Game | Research | Inclusion
+        </span>
+      </div>
+    </a>
+    <nav class="hidden md:block">
+      <ul class="flex items-center gap-7 text-sm">
+        {navItems.map((item) => {
+          const isActive = item.match(pathname);
+          return (
+            <li>
+              <a
+                href={item.href}
+                class={`header-link no-underline ${isActive ? "header-link-active" : ""}`}
+              >
+                {item.label}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+    <details class="md:hidden relative">
+      <summary class="header-mobile-trigger list-none cursor-pointer rounded-md border px-3 py-2 text-sm">
+        Menu
+      </summary>
+      <div class="absolute right-0 top-full z-50 mt-2 w-56 rounded-md border border-nx-gray-light/30 bg-white p-2 shadow-lg">
+        <ul class="space-y-1">
+          {navItems.map((item) => (
+            <li>
+              <a href={item.href} class="block rounded px-3 py-2 text-sm text-nx-dark no-underline hover:bg-nx-cyan-light">
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    background-color: transparent;
+    color: var(--color-nx-dark);
+    transition: background-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+  }
+  .site-header.is-scrolled {
+    background-color: var(--color-nx-dark);
+    color: white;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .header-brand-text {
+    color: var(--color-nx-dark);
+    transition: color 0.25s ease;
+  }
+  .site-header.is-scrolled .header-brand-text {
+    color: white;
+  }
+
+  .header-tagline {
+    transition: color 0.25s ease;
+  }
+  .site-header.is-scrolled .header-tagline {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .header-link {
+    color: var(--color-nx-gray-dark);
+    transition: color 0.2s ease;
+  }
+  .header-link:hover {
+    color: var(--color-nx-cyan);
+  }
+  .header-link-active {
+    color: var(--color-nx-dark);
+    font-weight: 600;
+  }
+
+  .site-header.is-scrolled .header-link {
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .site-header.is-scrolled .header-link:hover,
+  .site-header.is-scrolled .header-link-active {
+    color: white;
+  }
+
+  .header-mobile-trigger {
+    border-color: color-mix(in srgb, var(--color-nx-gray-light) 50%, transparent);
+    color: var(--color-nx-dark);
+    transition: color 0.25s ease, border-color 0.25s ease;
+  }
+  .site-header.is-scrolled .header-mobile-trigger {
+    color: white;
+    border-color: rgba(255, 255, 255, 0.4);
+  }
+</style>
+
+<script is:inline>
+  (function () {
+    const header = document.getElementById("site-header");
+    if (!header) return;
+    let ticking = false;
+    function update() {
+      header.classList.toggle("is-scrolled", window.scrollY > 30);
+      ticking = false;
+    }
+    update();
+    window.addEventListener("scroll", function () {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(update);
+    }, { passive: true });
+  })();
+</script>

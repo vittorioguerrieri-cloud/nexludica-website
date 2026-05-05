@@ -1,0 +1,65 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Area Soci — NexLudica APS" description="Area riservata agli associati NexLudica.">
+  <section class="nx-hero-pattern px-4 pb-16 pt-28 text-center">
+    <h1 class="text-4xl font-extrabold text-nx-dark md:text-5xl" style="font-family: var(--font-display);">
+      Area Soci
+    </h1>
+    <p class="mx-auto mt-4 max-w-2xl text-lg text-nx-gray-dark">
+      Accedi alla tua area riservata per gestire il tuo profilo e le tue attività.
+    </p>
+  </section>
+
+  <section class="mx-auto max-w-md px-4 py-16">
+    <div class="rounded-xl border border-nx-gray-light/20 bg-white p-8 shadow-sm">
+      <h2 class="text-center text-xl font-bold text-nx-dark">Accedi</h2>
+      <p class="mt-2 text-center text-sm text-nx-gray-dark">
+        Inserisci le tue credenziali per accedere all'area riservata.
+      </p>
+      <form class="mt-6 space-y-4">
+        <div>
+          <label for="login-email" class="block text-sm font-medium text-nx-dark">Email</label>
+          <input
+            type="email"
+            id="login-email"
+            name="email"
+            required
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+        </div>
+        <div>
+          <label for="login-password" class="block text-sm font-medium text-nx-dark">Password</label>
+          <input
+            type="password"
+            id="login-password"
+            name="password"
+            required
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full rounded-lg bg-nx-cyan px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-nx-blue"
+        >
+          Accedi
+        </button>
+      </form>
+      <p class="mt-6 text-center text-xs text-nx-gray-dark">
+        Non sei ancora socio?
+        <a href="/supportaci" class="text-nx-cyan hover:underline">Scopri come diventarlo</a>
+      </p>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-4xl px-4 pb-16">
+    <div class="rounded-lg border border-amber-200 bg-amber-50 p-6 text-center">
+      <p class="text-sm text-amber-800">
+        <strong>🚧 In costruzione</strong> — L'area soci è attualmente in fase di sviluppo.
+        Presto potrai accedere per gestire il tuo profilo, vedere lo storico delle tue partecipazioni
+        e comunicare con gli altri associati.
+      </p>
+    </div>
+  </section>
+</BaseLayout>

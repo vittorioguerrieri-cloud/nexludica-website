@@ -1,0 +1,82 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="NexLudica APS — Cultura ludica e inclusione sociale">
+  <!-- Hero -->
+  <section class="nx-hero-pattern px-4 pb-20 pt-28 text-center">
+    <h1 class="mx-auto max-w-3xl text-4xl font-extrabold leading-tight text-nx-dark md:text-5xl lg:text-6xl" style="font-family: var(--font-display);">
+      Cultura ludica per l'inclusione sociale
+    </h1>
+    <p class="mx-auto mt-6 max-w-2xl text-lg text-nx-gray-dark">
+      NexLudica è un'associazione di promozione sociale che utilizza il gioco come strumento di
+      connessione, educazione e crescita comunitaria.
+    </p>
+    <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
+      <a
+        href="/progetti"
+        class="inline-block rounded-lg bg-nx-cyan px-6 py-3 text-sm font-semibold text-white no-underline shadow-md transition hover:bg-nx-blue"
+      >
+        Scopri i progetti
+      </a>
+      <a
+        href="/supportaci"
+        class="inline-block rounded-lg border-2 border-nx-cyan px-6 py-3 text-sm font-semibold text-nx-cyan no-underline transition hover:bg-nx-cyan hover:text-white"
+      >
+        Supportaci
+      </a>
+    </div>
+  </section>
+
+  <!-- Cosa facciamo -->
+  <section class="mx-auto max-w-6xl px-4 py-20">
+    <h2 class="text-center text-3xl font-bold text-nx-dark">Cosa facciamo</h2>
+    <p class="mx-auto mt-4 max-w-2xl text-center text-nx-gray-dark">
+      Promuoviamo la cultura ludica come veicolo di inclusione, educazione e partecipazione attiva.
+    </p>
+    <div class="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-nx-cyan-light text-2xl">
+          🎲
+        </div>
+        <h3 class="text-lg font-semibold text-nx-dark">Eventi ludici</h3>
+        <p class="mt-2 text-sm text-nx-gray-dark">
+          Organizziamo serate di gioco da tavolo e gioco di ruolo aperte a tutti, in diverse sedi sul territorio.
+        </p>
+      </div>
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-nx-cyan-light text-2xl">
+          🤝
+        </div>
+        <h3 class="text-lg font-semibold text-nx-dark">Inclusione sociale</h3>
+        <p class="mt-2 text-sm text-nx-gray-dark">
+          Il gioco come strumento per abbattere barriere, creare connessioni e costruire comunità.
+        </p>
+      </div>
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-nx-cyan-light text-2xl">
+          📚
+        </div>
+        <h3 class="text-lg font-semibold text-nx-dark">Ricerca e formazione</h3>
+        <p class="mt-2 text-sm text-nx-gray-dark">
+          Studiamo l'impatto sociale del gioco e formiamo educatori, volontari e professionisti.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Donazione -->
+  <section class="bg-nx-blue-deep px-4 py-16 text-center text-white">
+    <h2 class="text-3xl font-bold">Sostieni la nostra missione</h2>
+    <p class="mx-auto mt-4 max-w-xl text-white/80">
+      Con il tuo contributo possiamo continuare a portare il gioco dove serve di più.
+      Ogni donazione fa la differenza.
+    </p>
+    <a
+      href="/supportaci"
+      class="mt-8 inline-block rounded-lg bg-nx-accent px-8 py-3 text-sm font-bold text-nx-dark no-underline shadow-md transition hover:bg-amber-400"
+    >
+      Dona ora
+    </a>
+  </section>
+</BaseLayout>
