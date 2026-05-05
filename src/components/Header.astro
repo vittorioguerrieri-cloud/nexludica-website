@@ -13,23 +13,13 @@ const navItems = [
 
 <header id="site-header" class="site-header sticky top-0 z-40">
   <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-    <a href="/" class="header-brand flex items-center gap-2.5 no-underline">
+    <a href="/" class="header-brand flex items-center no-underline" aria-label="NexLudica - home">
       <img
-        src="/images/branding/logo-mark.svg"
-        alt=""
-        width="36"
-        height="36"
-        class="h-9 w-9"
+        src="/images/branding/logo-horizontal.svg"
+        alt="NexLudica"
+        class="h-10 w-auto sm:h-12"
         loading="eager"
       />
-      <div class="flex flex-col">
-        <span class="header-brand-text text-lg font-bold leading-tight tracking-tight">
-          <span class="text-nx-cyan">Nex</span>Ludica
-        </span>
-        <span class="header-tagline hidden text-[10px] tracking-widest text-nx-gray-dark sm:block">
-          Game | Research | Inclusion
-        </span>
-      </div>
     </a>
     <nav class="hidden md:block">
       <ul class="flex items-center gap-7 text-sm">
@@ -79,19 +69,15 @@ const navItems = [
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
   }
 
-  .header-brand-text {
-    color: var(--color-nx-dark);
-    transition: color 0.25s ease;
+  /*
+   * Quando l'header e' scrolled (sfondo scuro), il logo SVG (cyan + dark) puo'
+   * sparire sul nero: usiamo un filter brightness per renderlo bianco/cyan piu' chiaro.
+   */
+  .header-brand img {
+    transition: filter 0.25s ease;
   }
-  .site-header.is-scrolled .header-brand-text {
-    color: white;
-  }
-
-  .header-tagline {
-    transition: color 0.25s ease;
-  }
-  .site-header.is-scrolled .header-tagline {
-    color: rgba(255, 255, 255, 0.6);
+  .site-header.is-scrolled .header-brand img {
+    filter: brightness(0) invert(1);
   }
 
   .header-link {
