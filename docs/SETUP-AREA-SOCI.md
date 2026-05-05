@@ -15,8 +15,12 @@ caricare resoconti MeetLudica, gestire il profilo".
 npx wrangler d1 create nexludica
 ```
 
-L'output contiene un `database_id`. **Copialo** e incollalo in `wrangler.jsonc` al
-posto del placeholder `REPLACE_WITH_OUTPUT_OF_wrangler_d1_create`.
+L'output contiene un `database_id`. **Copialo** e poi modifica `wrangler.jsonc`:
+
+1. **Scommenta** i blocchi `d1_databases` e `r2_buckets` (rimuovi le `//` davanti).
+2. Sostituisci `database_id` con il valore copiato dall'output.
+
+Esempio risultato:
 
 ```jsonc
 "d1_databases": [
@@ -25,7 +29,13 @@ posto del placeholder `REPLACE_WITH_OUTPUT_OF_wrangler_d1_create`.
     "database_name": "nexludica",
     "database_id": "abcd1234-..."
   }
-]
+],
+"r2_buckets": [
+  {
+    "binding": "STORAGE",
+    "bucket_name": "nexludica-articles"
+  }
+],
 ```
 
 ## 2. Crea il bucket R2
