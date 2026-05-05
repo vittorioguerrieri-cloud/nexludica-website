@@ -2,39 +2,75 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 
 const partners = [
-  { name: "Università di Milano-Bicocca", role: "Ricerca scientifica" },
-  { name: "Centro di Solidarietà di Genova", role: "Territorio" },
-  { name: "Istituto Tecnologie Didattiche — CNR", role: "Ricerca didattica" },
-  { name: "Centro di Ricerca sul Gioco", role: "Network scientifico" },
-  { name: "Acquedotti", role: "Game design" },
-  { name: "Fondazione Cariplo", role: "Co-finanziamento" },
+  {
+    name: "Università di Milano-Bicocca",
+    role: "Ricerca scientifica",
+    logo: "/images/partners/bicocca.png",
+  },
+  {
+    name: "Centro di Solidarietà di Genova",
+    role: "Territorio",
+    logo: "/images/partners/centro-solidarieta.png",
+  },
+  {
+    name: "Istituto Tecnologie Didattiche — CNR",
+    role: "Ricerca didattica",
+    logo: "/images/partners/itd-cnr.png",
+  },
+  {
+    name: "Centro di Ricerca sul Gioco — UniGe",
+    role: "Network scientifico",
+    logo: "/images/partners/cerg-unige.png",
+  },
+  {
+    name: "Acquedotti",
+    role: "Game design",
+    logo: "/images/partners/acquedotti.png",
+  },
+  {
+    name: "Fondazione Cariplo",
+    role: "Co-finanziamento",
+    logo: "/images/partners/cariplo.png",
+  },
 ];
 ---
 
 <BaseLayout title="NexLudica APS — Cultura ludica per l'inclusione sociale">
   <!-- Hero -->
-  <section class="nx-hero-pattern px-4 pb-20 pt-28 text-center">
-    <h1 class="mx-auto max-w-3xl text-4xl font-extrabold leading-tight text-nx-dark md:text-5xl lg:text-6xl" style="font-family: var(--font-display);">
-      Il gioco come strumento di trasformazione sociale
-    </h1>
-    <p class="mx-auto mt-6 max-w-2xl text-lg text-nx-gray-dark">
-      Giocare è molto più che un passatempo: è un'esperienza che coinvolge mente e relazioni.
-      NexLudica esplora il potenziale del gioco da tavolo per il benessere, l'inclusione
-      e lo sviluppo di competenze trasversali.
-    </p>
-    <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
-      <a
-        href="/progetti"
-        class="inline-block rounded-lg bg-nx-cyan px-6 py-3 text-sm font-semibold text-white no-underline shadow-md transition hover:bg-nx-blue"
-      >
-        Scopri i progetti
-      </a>
-      <a
-        href="/supportaci"
-        class="inline-block rounded-lg border-2 border-nx-cyan px-6 py-3 text-sm font-semibold text-nx-cyan no-underline transition hover:bg-nx-cyan hover:text-white"
-      >
-        Supportaci
-      </a>
+  <section class="nx-hero-pattern px-4 pb-20 pt-20">
+    <div class="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-2">
+      <div class="text-center lg:text-left">
+        <h1 class="text-4xl font-extrabold leading-tight text-nx-dark md:text-5xl lg:text-5xl xl:text-6xl" style="font-family: var(--font-display);">
+          Il gioco come strumento di trasformazione sociale
+        </h1>
+        <p class="mt-6 text-lg text-nx-gray-dark">
+          Giocare è molto più che un passatempo: è un'esperienza che coinvolge
+          mente e relazioni. NexLudica esplora il potenziale del gioco da tavolo
+          per il benessere, l'inclusione e lo sviluppo di competenze trasversali.
+        </p>
+        <div class="mt-8 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
+          <a
+            href="/progetti"
+            class="inline-block rounded-lg bg-nx-cyan px-6 py-3 text-sm font-semibold text-white no-underline shadow-md transition hover:bg-nx-blue"
+          >
+            Scopri i progetti
+          </a>
+          <a
+            href="/supportaci"
+            class="inline-block rounded-lg border-2 border-nx-cyan px-6 py-3 text-sm font-semibold text-nx-cyan no-underline transition hover:bg-nx-cyan hover:text-white"
+          >
+            Supportaci
+          </a>
+        </div>
+      </div>
+      <div class="hidden lg:block">
+        <img
+          src="/images/community.png"
+          alt="Momenti dalla comunità NexLudica"
+          class="mx-auto w-full max-w-md"
+          loading="eager"
+        />
+      </div>
     </div>
   </section>
 
@@ -80,10 +116,18 @@ const partners = [
       <p class="mx-auto mt-4 max-w-2xl text-center text-nx-gray-dark">
         Lavoriamo con università, enti di ricerca e realtà del terzo settore.
       </p>
-      <div class="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {partners.map((p) => (
-          <div class="rounded-lg border border-nx-gray-light/20 bg-white p-5">
-            <p class="text-base font-semibold text-nx-dark">{p.name}</p>
+          <div class="flex flex-col items-center rounded-lg border border-nx-gray-light/20 bg-white p-6 text-center transition hover:shadow-md">
+            <div class="flex h-24 w-full items-center justify-center">
+              <img
+                src={p.logo}
+                alt={p.name}
+                class="max-h-full max-w-full object-contain"
+                loading="lazy"
+              />
+            </div>
+            <p class="mt-4 text-sm font-semibold text-nx-dark">{p.name}</p>
             <p class="mt-1 text-xs uppercase tracking-wider text-nx-cyan">{p.role}</p>
           </div>
         ))}
