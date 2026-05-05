@@ -16,8 +16,10 @@ declare namespace App {
 
 interface Env {
   ASSETS: Fetcher;
-  DB: D1Database;
-  STORAGE: R2Bucket;
+  /** D1 binding. Opzionale: assente finche' non crei il DB e attivi il binding. */
+  DB?: D1Database;
+  /** R2 binding. Opzionale: assente finche' non crei il bucket e attivi il binding. */
+  STORAGE?: R2Bucket;
   SITE_URL: string;
   FROM_EMAIL: string;
   FROM_NAME: string;

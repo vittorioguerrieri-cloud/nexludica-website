@@ -7,19 +7,25 @@
 		"directory": "./dist",
 		"binding": "ASSETS"
 	},
-	"d1_databases": [
-		{
-			"binding": "DB",
-			"database_name": "nexludica",
-			"database_id": "REPLACE_WITH_OUTPUT_OF_wrangler_d1_create"
-		}
-	],
-	"r2_buckets": [
-		{
-			"binding": "STORAGE",
-			"bucket_name": "nexludica-articles"
-		}
-	],
+	// D1 e R2 sono commentati finche' non vengono create le risorse:
+	//   1. npx wrangler d1 create nexludica
+	//   2. npx wrangler r2 bucket create nexludica-articles
+	// Vedi docs/SETUP-AREA-SOCI.md per i dettagli.
+	// Quando crei il D1, decommenta il blocco e sostituisci database_id.
+	//
+	// "d1_databases": [
+	// 	{
+	// 		"binding": "DB",
+	// 		"database_name": "nexludica",
+	// 		"database_id": "REPLACE_WITH_OUTPUT_OF_wrangler_d1_create"
+	// 	}
+	// ],
+	// "r2_buckets": [
+	// 	{
+	// 		"binding": "STORAGE",
+	// 		"bucket_name": "nexludica-articles"
+	// 	}
+	// ],
 	"vars": {
 		"SITE_URL": "https://nexludica-website.vittorio-guerrieri-310.workers.dev",
 		"FROM_EMAIL": "noreply@nexludica.org",
