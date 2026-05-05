@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { getDb } from "../../../server/db";
+import { getDb, getEnv } from "../../../server/db";
 import { loadUserFromContext } from "../../../server/auth";
 import {
   createArticle,
@@ -13,9 +13,8 @@ export const prerender = false;
 const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
 
 export const GET: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
+  const env = (await getEnv()) as Env;
+  const db = getDb(env);
   if (!db) return json({ articles: [] });
   const onlyMine = ctx.url.searchParams.get("mine") === "1";
   if (onlyMine) {
@@ -27,9 +26,8 @@ export const GET: APIRoute = async (ctx) => {
 };
 
 export const POST: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
+  const env = (await getEnv()) as Env;
+  const db = getDb(env);
   const storage = env?.STORAGE ?? null;
   if (!db || !storage) return json({ error: "backend" }, 503);
   const user = await loadUserFromContext(ctx);

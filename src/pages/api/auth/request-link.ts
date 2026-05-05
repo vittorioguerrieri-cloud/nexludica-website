@@ -1,15 +1,14 @@
 import type { APIRoute } from "astro";
-import { getDb } from "../../../server/db";
+import { getDb, getEnv } from "../../../server/db";
 import { createMagicLink, findUserByEmail } from "../../../server/auth";
 import { magicLinkEmail, sendEmail } from "../../../server/email";
 
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
-  if (!env || !db) {
+  const env = (await getEnv()) as Env;
+  const db = getDb(env);
+  if (!db) {
     return json({ ok: false, error: "Backend non configurato (D1 mancante)" }, 503);
   }
 

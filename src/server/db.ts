@@ -91,3 +91,19 @@ export function secureToken(bytes = 32): string {
 export function getDb(env: Env): D1Database | null {
   return env?.DB ?? null;
 }
+
+/**
+ * Restituisce l'oggetto env del Worker. In Astro 6 si importa
+ * direttamente da "cloudflare:workers". In ambienti senza il modulo
+ * (test, build statico) ritorna un oggetto vuoto come fallback.
+ */
+export async function getEnv(): Promise<Partial<Env>> {
+  try {
+    // Import dinamico: il modulo "cloudflare:workers" e' fornito dal
+    // runtime Workers. In dev/build potrebbe non esistere.
+    const mod = await import(/* @vite-ignore */ "cloudflare:workers");
+    return (mod.env as Partial<Env>) ?? {};
+  } catch {
+    return {};
+  }
+}

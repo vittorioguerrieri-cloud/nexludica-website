@@ -52,16 +52,32 @@ Il nome deve combaciare con `bucket_name` in `wrangler.jsonc` (`nexludica-articl
 # Schema iniziale (tabelle)
 npx wrangler d1 execute nexludica --remote --file=migrations/0001_init.sql
 
-# Seed: crea utente admin Vittorio (email vittorio.guerrieri@nexludica.org).
-# Modifica l'email in 0002_seed_admin.sql se diversa, prima di eseguire.
+# Seed: crea i 7 soci attuali. Email reale solo per Vittorio
+# (vittorio.guerrieri@nexludica.org). Gli altri hanno email
+# placeholder *.invalid per evitare conflitti con email reali in
+# attesa che si attivino.
 npx wrangler d1 execute nexludica --remote --file=migrations/0002_seed_admin.sql
 ```
 
-Aggiungi nuovi soci con un INSERT manuale per ora (oppure UI admin in futuro):
+### Attivare un socio (sostituire email placeholder)
+
+Quando un socio è pronto a fare login, sostituisci la sua email con
+quella vera:
 
 ```bash
 npx wrangler d1 execute nexludica --remote --command \
-  "INSERT INTO users (id, email, name, role, active, created_at) VALUES ('$(uuidgen)', 'altro.socio@nexludica.org', 'Altro Socio', 'member', 1, unixepoch()*1000)"
+  "UPDATE users SET email = 'raluca.fulgu@example.com' WHERE name = 'Raluca Fulgu'"
+```
+
+Il socio andrà su `/login`, inserirà la sua email, riceverà il magic link,
+e al primo accesso potrà completare il proprio profilo da `/area-soci/profilo`.
+
+### Aggiungere un nuovo socio
+
+```bash
+npx wrangler d1 execute nexludica --remote --command \
+  "INSERT INTO users (id, email, name, role, active, created_at)
+   VALUES (lower(hex(randomblob(16))), 'nome@dominio.it', 'Nome Cognome', 'member', 1, unixepoch()*1000)"
 ```
 
 ## 4. Imposta i secret in produzione

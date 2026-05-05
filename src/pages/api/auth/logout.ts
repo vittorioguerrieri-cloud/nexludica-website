@@ -1,13 +1,12 @@
 import type { APIRoute } from "astro";
-import { getDb } from "../../../server/db";
+import { getDb, getEnv } from "../../../server/db";
 import { clearSessionCookie, destroySession, readSessionCookie } from "../../../server/auth";
 
 export const prerender = false;
 
 export const POST: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
+  const env = (await getEnv()) as Env;
+  const db = getDb(env);
   const sid = readSessionCookie(ctx.request);
   if (db && sid) await destroySession(db, sid);
 

@@ -1,6 +1,6 @@
 ---
 import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
-import { getDb } from "../../../server/db";
+import { getDb, getEnv } from "../../../server/db";
 import { listMyArticles } from "../../../server/articles";
 import { getUser } from "../../../server/guards";
 
@@ -10,9 +10,8 @@ const user = await getUser(Astro);
 if (!user) {
   return Astro.redirect("/login");
 }
-// @ts-expect-error
-const env: Env | undefined = Astro.locals?.runtime?.env;
-const db = env ? getDb(env) : null;
+const env = await getEnv();
+const db = getDb(env as Env);
 let articles: Awaited<ReturnType<typeof listMyArticles>> = [];
 if (db) {
   try {

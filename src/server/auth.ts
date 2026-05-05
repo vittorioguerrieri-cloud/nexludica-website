@@ -12,7 +12,7 @@
  */
 
 import type { APIContext } from "astro";
-import { getDb, now, secureToken, uuid } from "./db";
+import { getDb, getEnv, now, secureToken, uuid } from "./db";
 import type { UserRow } from "./db";
 
 const SESSION_COOKIE = "nx_session";
@@ -190,9 +190,8 @@ export async function loadUserFromContext(ctx: APIContext): Promise<SessionUser 
   try {
     const sid = readSessionCookie(ctx.request);
     if (!sid) return null;
-    // @ts-expect-error - env esposta da @astrojs/cloudflare in ctx.locals.runtime.env
-    const env: Env | undefined = ctx.locals?.runtime?.env;
-    const db = env ? getDb(env) : null;
+    const env = await getEnv();
+    const db = getDb(env as Env);
     if (!db) return null;
     return await loadSessionUser(db, sid);
   } catch {

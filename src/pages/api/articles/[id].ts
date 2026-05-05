@@ -1,14 +1,13 @@
 import type { APIRoute } from "astro";
-import { getDb } from "../../../server/db";
+import { getDb, getEnv } from "../../../server/db";
 import { loadUserFromContext } from "../../../server/auth";
 import { deleteArticle, updateArticle } from "../../../server/articles";
 
 export const prerender = false;
 
 export const PATCH: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
+  const env = (await getEnv()) as Env;
+  const db = getDb(env);
   if (!db) return json({ error: "backend" }, 503);
   const user = await loadUserFromContext(ctx);
   if (!user) return json({ error: "unauthorized" }, 401);
@@ -27,9 +26,8 @@ export const PATCH: APIRoute = async (ctx) => {
 };
 
 export const DELETE: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
-  const db = env ? getDb(env) : null;
+  const env = (await getEnv()) as Env;
+  const db = getDb(env);
   if (!db) return json({ error: "backend" }, 503);
   const user = await loadUserFromContext(ctx);
   if (!user) return json({ error: "unauthorized" }, 401);

@@ -7,12 +7,12 @@
  * associato sia in stato "published".
  */
 import type { APIRoute } from "astro";
+import { getEnv } from "../../server/db";
 
 export const prerender = false;
 
 export const GET: APIRoute = async (ctx) => {
-  // @ts-expect-error
-  const env: Env | undefined = ctx.locals?.runtime?.env;
+  const env = (await getEnv()) as Env;
   const storage = env?.STORAGE;
   if (!storage) return new Response("Storage non disponibile", { status: 503 });
 
