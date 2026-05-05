@@ -13,11 +13,18 @@ const navItems = [
 
 <header id="site-header" class="site-header sticky top-0 z-40">
   <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-    <a href="/" class="header-brand flex items-center no-underline" aria-label="NexLudica - home">
+    <a href="/" class="header-brand relative flex items-center no-underline" aria-label="NexLudica - home">
       <img
         src="/images/branding/logo-horizontal.svg"
         alt="NexLudica"
-        class="h-12 w-auto sm:h-14"
+        class="logo-default h-12 w-auto sm:h-14"
+        loading="eager"
+      />
+      <img
+        src="/images/branding/logo-horizontal-white.svg"
+        alt=""
+        aria-hidden="true"
+        class="logo-white absolute inset-0 h-12 w-auto opacity-0 sm:h-14"
         loading="eager"
       />
     </a>
@@ -70,15 +77,19 @@ const navItems = [
   }
 
   /*
-   * Su sfondo dark (header scrolled), il logo SVG potrebbe essere poco
-   * leggibile (parte gray scuro che si confonde col nero). Piccolo
-   * brightness boost per renderlo piu' chiaro.
+   * Due versioni del logo, sovrapposte: quando scrolled, fade tra le due.
+   * - logo-horizontal.svg: gray (Ludica) + cyan (Nex/dadi) → sfondo chiaro
+   * - logo-horizontal-white.svg: white (Ludica) + cyan (Nex/dadi) → sfondo scuro
    */
-  .header-brand img {
-    transition: filter 0.25s ease;
+  .logo-default,
+  .logo-white {
+    transition: opacity 0.25s ease;
   }
-  .site-header.is-scrolled .header-brand img {
-    filter: brightness(1.2) contrast(1.1);
+  .site-header.is-scrolled .logo-default {
+    opacity: 0;
+  }
+  .site-header.is-scrolled .logo-white {
+    opacity: 1;
   }
 
   .header-link {
