@@ -1,7 +1,7 @@
 {
 	"compatibility_date": "2026-05-05",
 	"compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
-	"name": "nexludica",
+	"name": "nexludica-website",
 	"main": "@astrojs/cloudflare/entrypoints/server",
 	"assets": {
 		"directory": "./dist",
