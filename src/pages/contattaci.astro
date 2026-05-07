@@ -81,7 +81,16 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
       <!-- Form contatto -->
       <div>
-        <form class="space-y-5 rounded-xl border border-nx-gray-light/20 bg-white p-8 shadow-sm">
+        <form id="contact-form" class="space-y-5 rounded-xl border border-nx-gray-light/20 bg-white p-8 shadow-sm">
+          <!-- Honeypot anti-bot: invisibile agli umani, i bot tendono a riempirlo -->
+          <input
+            type="text"
+            name="website"
+            tabindex="-1"
+            autocomplete="off"
+            style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;"
+            aria-hidden="true"
+          />
           <div>
             <label for="name" class="block text-sm font-medium text-nx-dark">Nome</label>
             <input
@@ -135,8 +144,53 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             I tuoi dati saranno trattati nel rispetto della
             <a href="/privacy-policy" class="text-nx-cyan hover:underline">Privacy Policy</a>.
           </p>
+          <div id="contact-result" class="hidden rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            ✓ Messaggio inviato. Ti rispondiamo al più presto.
+          </div>
+          <div id="contact-error" class="hidden rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"></div>
         </form>
       </div>
     </div>
   </section>
+
+  <script is:inline>
+    (function () {
+      const form = document.getElementById("contact-form");
+      const ok = document.getElementById("contact-result");
+      const err = document.getElementById("contact-error");
+      if (!form) return;
+      form.addEventListener("submit", async function (e) {
+        e.preventDefault();
+        ok.classList.add("hidden");
+        err.classList.add("hidden");
+        const fd = new FormData(form);
+        const body = Object.fromEntries(fd.entries());
+        const btn = form.querySelector("button[type=submit]");
+        btn.disabled = true;
+        const oldText = btn.textContent;
+        btn.textContent = "Invio in corso...";
+        try {
+          const res = await fetch("/api/contact", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            err.textContent = data.error || "Errore durante l'invio.";
+            err.classList.remove("hidden");
+          } else {
+            ok.classList.remove("hidden");
+            form.reset();
+          }
+        } catch (e) {
+          err.textContent = "Errore di rete. Riprova.";
+          err.classList.remove("hidden");
+        } finally {
+          btn.disabled = false;
+          btn.textContent = oldText;
+        }
+      });
+    })();
+  </script>
 </BaseLayout>

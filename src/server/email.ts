@@ -12,6 +12,7 @@ export interface EmailMessage {
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string;
 }
 
 export interface SendResult {
@@ -49,6 +50,7 @@ export async function sendEmail(env: Env, msg: EmailMessage): Promise<SendResult
         subject: msg.subject,
         html: msg.html,
         text: msg.text ?? stripHtml(msg.html),
+        ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
       }),
     });
     if (!res.ok) {
