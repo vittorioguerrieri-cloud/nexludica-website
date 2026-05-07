@@ -119,7 +119,9 @@ const statusColors: Record<string, string> = {
           )}
           <div class="min-w-0 flex-1">
             <p class="truncate font-bold text-nx-dark">{m.name}</p>
-            <p class="truncate text-xs text-nx-gray-dark">{m.email}</p>
+            <p class="truncate text-xs text-nx-gray-dark">
+              {m.email.endsWith(".invalid") ? <span class="italic text-nx-gray-light">email da definire</span> : m.email}
+            </p>
             {m.roleLabel && (
               <p class="mt-0.5 truncate text-xs text-nx-cyan">{m.roleLabel}</p>
             )}
