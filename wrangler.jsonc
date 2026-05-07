@@ -23,7 +23,8 @@
 	"vars": {
 		"SITE_URL": "https://nexludica-website.vittorio-guerrieri-310.workers.dev",
 		"FROM_EMAIL": "noreply@nexludica.org",
-		"FROM_NAME": "NexLudica APS"
+		"FROM_NAME": "NexLudica APS",
+		"DRIVE_ROOT_FOLDER_ID": "1xS3oQf-4mV7dRgjtIqwPO7KI0rvXF0xy"
 	},
 	"observability": {
 		"enabled": true

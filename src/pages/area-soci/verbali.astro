@@ -1,68 +1,96 @@
 ---
 import AreaSociLayout from "../../layouts/AreaSociLayout.astro";
-import { driveFolders } from "../../lib/drive";
+import { getEnv } from "../../server/db";
+import { listFolders, type DriveFolder } from "../../server/drive";
 
 export const prerender = false;
+
+const env = await getEnv();
+const rootId = (env as Env).DRIVE_ROOT_FOLDER_ID;
+let folders: DriveFolder[] = [];
+let driveError: string | null = null;
+if (rootId) {
+  try {
+    folders = await listFolders(env as Env, rootId);
+  } catch (e) {
+    driveError = String(e);
+    console.error("[verbali] drive list failed:", e);
+  }
+} else {
+  driveError = "DRIVE_ROOT_FOLDER_ID non configurato";
+}
+
+// Icone tematiche per nomi cartella ricorrenti
+function iconFor(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("verbal")) return "▤";
+  if (n.includes("statut") || n.includes("atto")) return "📜";
+  if (n.includes("bilanc") || n.includes("rendicont")) return "₿";
+  if (n.includes("modul") || n.includes("soci")) return "✎";
+  if (n.includes("comunic") || n.includes("brand") || n.includes("grafic")) return "♦";
+  if (n.includes("progett") || n.includes("ricerca")) return "▴";
+  return "▣";
+}
 ---
 
 <AreaSociLayout title="Verbali e documenti — Area Soci" active="verbali">
   <div>
     <h2 class="text-2xl font-bold text-nx-dark">Verbali e documenti dell'associazione</h2>
     <p class="mt-2 max-w-3xl text-sm text-nx-gray-dark">
-      Cartelle condivise via Google Drive con i documenti utili alla vita dell'associazione.
-      L'accesso è ristretto ai soci tramite l'account Google associato all'email che ti
-      identifica come socio.
+      Cartelle Google Drive con i documenti utili alla vita dell'associazione. Click per
+      aprire la cartella su Drive — l'accesso richiede di essere loggato con un account
+      condiviso (chiedi a Vittorio se non vedi il contenuto).
     </p>
   </div>
 
-  <div class="mt-8 grid gap-4 sm:grid-cols-2">
-    {driveFolders.map((f) => {
-      const ready = f.url != null;
-      return (
+  {driveError && (
+    <div class="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+      <strong>Drive non disponibile:</strong> {driveError}
+    </div>
+  )}
+
+  {folders.length === 0 && !driveError && (
+    <div class="mt-8 rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-nx-off-white p-12 text-center">
+      <p class="text-base font-semibold text-nx-dark">Nessuna cartella ancora</p>
+      <p class="mt-2 text-sm text-nx-gray-dark">
+        Crea le sottocartelle nel tuo Drive — le vedrai qui automaticamente.
+      </p>
+    </div>
+  )}
+
+  {folders.length > 0 && (
+    <div class="mt-8 grid gap-4 sm:grid-cols-2">
+      {folders.map((f) => (
         <a
-          href={f.url ?? "#"}
-          target={ready ? "_blank" : undefined}
-          rel={ready ? "noopener noreferrer" : undefined}
-          class={`group flex gap-4 rounded-xl border bg-white p-6 no-underline transition ${
-            ready
-              ? "border-nx-gray-light/20 hover:border-nx-cyan hover:shadow-md"
-              : "cursor-not-allowed border-nx-gray-light/20 opacity-60"
-          }`}
+          href={f.webViewLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="group flex gap-4 rounded-xl border border-nx-gray-light/20 bg-white p-6 no-underline transition hover:border-nx-cyan hover:shadow-md"
         >
-          <span class={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg text-xl ${
-            ready ? "bg-nx-cyan-light text-nx-cyan" : "bg-nx-gray-light/20 text-nx-gray-dark"
-          }`}>
-            {f.icon}
+          <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-nx-cyan-light text-xl text-nx-cyan">
+            {iconFor(f.name)}
           </span>
           <div class="min-w-0">
-            <p class="text-base font-bold text-nx-dark">{f.title}</p>
-            <p class="mt-1 text-sm text-nx-gray-dark">{f.description}</p>
-            <p class={`mt-3 text-xs font-semibold uppercase tracking-wider ${
-              ready ? "text-nx-cyan" : "text-amber-700"
-            }`}>
-              {ready ? "Apri su Drive →" : "Cartella in configurazione"}
+            <p class="text-base font-bold text-nx-dark">{f.name}</p>
+            <p class="mt-1 text-xs text-nx-gray-dark">
+              Aggiornata: {new Date(f.modifiedTime).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
+            </p>
+            <p class="mt-3 text-xs font-semibold uppercase tracking-wider text-nx-cyan">
+              Apri su Drive →
             </p>
           </div>
         </a>
-      );
-    })}
-  </div>
+      ))}
+    </div>
+  )}
 
   <div class="mt-12 rounded-xl border border-nx-gray-light/20 bg-nx-off-white p-6">
-    <h3 class="text-base font-bold text-nx-dark">Come configurare le cartelle Drive</h3>
-    <ol class="mt-3 space-y-2 text-sm text-nx-gray-dark">
-      <li>1. Crea una cartella su Google Drive (es. "NexLudica · Verbali").</li>
-      <li>2. Click destro → Condividi → "Chiunque con il link" oppure aggiungi gli account dei soci.</li>
-      <li>3. Copia l'URL della cartella.</li>
-      <li>
-        4. Modifica <code class="rounded bg-white px-1.5 py-0.5 text-xs">src/lib/drive.ts</code> e
-        incolla l'URL nel campo <code>url</code> della voce corrispondente.
-      </li>
-      <li>5. Commit + push: il sito si aggiorna in pochi minuti.</li>
-    </ol>
-    <p class="mt-3 text-xs text-nx-gray-dark">
-      Più avanti possiamo integrarci con la Drive API per mostrare direttamente la lista dei
-      file in pagina, con anteprima e download.
+    <h3 class="text-base font-bold text-nx-dark">Come funziona</h3>
+    <p class="mt-3 text-sm text-nx-gray-dark">
+      Le cartelle vengono lette in tempo reale dalla cartella radice condivisa con il
+      service account <code class="rounded bg-white px-1.5 py-0.5 text-xs">nexludica-website@nexludica-website.iam.gserviceaccount.com</code>.
+      Per aggiungere una nuova categoria di documenti, crea una sottocartella in quella
+      radice — apparirà qui in automatico.
     </p>
   </div>
 </AreaSociLayout>

@@ -27,4 +27,8 @@ interface Env {
   RESEND_API_KEY?: string;
   /** Set via `wrangler secret put SESSION_SECRET`. Required in prod. */
   SESSION_SECRET?: string;
+  /** JSON service account Google. Set via `wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON`. */
+  GOOGLE_SERVICE_ACCOUNT_JSON?: string;
+  /** ID della cartella radice di NexLudica su Drive. */
+  DRIVE_ROOT_FOLDER_ID?: string;
 }

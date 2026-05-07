@@ -31,5 +31,10 @@ Thumbs.db
 coverage/
 *.local
 
+# secrets/keys (mai committare!)
+.tmp-*.json
+*service-account*.json
+*-key.json
+
 # claude code internal
 .claude/
