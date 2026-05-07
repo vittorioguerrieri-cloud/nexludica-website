@@ -59,13 +59,24 @@ if (db) {
                     placeholder="Una breve presentazione che apparirà sulla pagina pubblica."
                     class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">{profile?.bio ?? ""}</textarea>
         </div>
-        <div>
-          <label for="photoUrl" class="block text-sm font-medium text-nx-dark">URL foto profilo</label>
-          <input type="url" id="photoUrl" name="photoUrl" maxlength="500"
-                 placeholder="https://..."
-                 value={profile?.photoUrl ?? ""}
-                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
-          <p class="mt-1 text-xs text-nx-gray-dark">Per ora un link esterno. Upload dei file in arrivo.</p>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Foto profilo</label>
+          <div class="mt-2 flex items-center gap-4">
+            <div id="photo-preview" class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-nx-cyan-light text-2xl font-bold text-nx-cyan">
+              {profile?.photoUrl ? (
+                <img src={profile.photoUrl} alt="" class="h-full w-full object-cover" />
+              ) : (
+                <span>?</span>
+              )}
+            </div>
+            <div class="flex-1">
+              <input type="file" id="photo-file" accept="image/jpeg,image/png,image/webp"
+                     class="block w-full text-sm text-nx-dark file:mr-4 file:rounded-md file:border-0 file:bg-nx-cyan file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-wider file:text-white" />
+              <p class="mt-1 text-xs text-nx-gray-dark">JPG / PNG / WebP, max 5 MB. Quadrata o ritagliata centralmente.</p>
+              <p id="photo-status" class="mt-1 text-xs"></p>
+            </div>
+          </div>
+          <input type="hidden" id="photoUrl" name="photoUrl" value={profile?.photoUrl ?? ""} />
         </div>
         <div>
           <label for="website" class="block text-sm font-medium text-nx-dark">Sito web (opzionale)</label>
@@ -75,10 +86,10 @@ if (db) {
                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
         </div>
         <div>
-          <label for="linkedin" class="block text-sm font-medium text-nx-dark">LinkedIn (opzionale)</label>
-          <input type="url" id="linkedin" name="linkedin" maxlength="200"
-                 value={profile?.linkedin ?? ""}
-                 placeholder="https://www.linkedin.com/in/..."
+          <label for="instagram" class="block text-sm font-medium text-nx-dark">Instagram (opzionale)</label>
+          <input type="url" id="instagram" name="instagram" maxlength="200"
+                 value={profile?.instagram ?? ""}
+                 placeholder="https://www.instagram.com/..."
                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
         </div>
         <div class="sm:col-span-2 space-y-3">
@@ -216,6 +227,49 @@ if (db) {
 
 <script is:inline>
   (function () {
+    // Photo upload (immediato, indipendente dal salvataggio del form)
+    const fileInput = document.getElementById("photo-file");
+    const preview = document.getElementById("photo-preview");
+    const photoUrlHidden = document.getElementById("photoUrl");
+    const photoStatus = document.getElementById("photo-status");
+    if (fileInput && preview && photoUrlHidden) {
+      fileInput.addEventListener("change", async function (e) {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        if (f.size > 5 * 1024 * 1024) {
+          photoStatus.textContent = "File troppo grande (max 5 MB)";
+          photoStatus.className = "mt-1 text-xs text-red-600";
+          fileInput.value = "";
+          return;
+        }
+        photoStatus.textContent = "Caricamento in corso...";
+        photoStatus.className = "mt-1 text-xs text-nx-gray-dark";
+        const fd = new FormData();
+        fd.append("photo", f);
+        try {
+          const res = await fetch("/api/me/photo", { method: "POST", body: fd });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            photoStatus.textContent = "Errore: " + (data.error || res.status);
+            photoStatus.className = "mt-1 text-xs text-red-600";
+          } else {
+            photoUrlHidden.value = data.photoUrl;
+            // Aggiorna preview
+            preview.innerHTML = "";
+            const img = document.createElement("img");
+            img.src = data.photoUrl + "?t=" + Date.now();
+            img.className = "h-full w-full object-cover";
+            preview.appendChild(img);
+            photoStatus.textContent = "✓ Foto caricata. Salva il profilo per applicarla.";
+            photoStatus.className = "mt-1 text-xs text-emerald-600";
+          }
+        } catch (e) {
+          photoStatus.textContent = "Errore di rete";
+          photoStatus.className = "mt-1 text-xs text-red-600";
+        }
+      });
+    }
+
     const form = document.getElementById("profile-form");
     const status = document.getElementById("profile-status");
     if (!form) return;

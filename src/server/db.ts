@@ -21,7 +21,7 @@ export interface ProfileRow {
   skills: string | null;
   photo_url: string | null;
   website: string | null;
-  linkedin: string | null;
+  instagram: string | null;
   public_visible: number;
   sort_order: number;
   updated_at: number;

@@ -18,7 +18,9 @@ export const GET: APIRoute = async (ctx) => {
 
   const keyParts = (ctx.params.key as string | undefined)?.split("/") ?? [];
   const key = keyParts.join("/");
-  if (!key || !key.startsWith("articles/")) {
+  // Whitelist dei prefissi pubblici
+  const ALLOWED_PREFIXES = ["articles/", "profiles/"];
+  if (!key || !ALLOWED_PREFIXES.some((p) => key.startsWith(p))) {
     return new Response("Not Found", { status: 404 });
   }
 

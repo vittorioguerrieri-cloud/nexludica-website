@@ -38,7 +38,7 @@ export const PUT: APIRoute = async (ctx) => {
     skills: optStr(body.skills),
     photoUrl: optStr(body.photoUrl ?? body.photo_url),
     website: optStr(body.website),
-    linkedin: optStr(body.linkedin),
+    instagram: optStr(body.instagram),
     publicVisible: optBool(body.publicVisible ?? body.public_visible),
     emailPublic: optBool(body.emailPublic ?? body.email_public),
   });

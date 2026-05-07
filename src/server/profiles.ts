@@ -11,7 +11,7 @@ export interface PublicMember {
   skills: string | null;
   photoUrl: string | null;
   website: string | null;
-  linkedin: string | null;
+  instagram: string | null;
   email: string | null; // popolato solo se email_public = 1
   sortOrder: number;
 }
@@ -28,7 +28,7 @@ export async function listPublicMembers(db: D1Database): Promise<PublicMember[]>
     .prepare(
       `SELECT u.id as user_id, u.name as user_name, u.email as email,
               p.display_name, p.role_label, p.bio, p.skills, p.photo_url,
-              p.website, p.linkedin, p.sort_order, p.email_public
+              p.website, p.instagram, p.sort_order, p.email_public
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        WHERE u.active = 1 AND COALESCE(p.public_visible, 1) = 1
@@ -43,7 +43,7 @@ export async function listPublicMembers(db: D1Database): Promise<PublicMember[]>
     skills: (r.skills as string) ?? null,
     photoUrl: (r.photo_url as string) ?? null,
     website: (r.website as string) ?? null,
-    linkedin: (r.linkedin as string) ?? null,
+    instagram: (r.instagram as string) ?? null,
     email: (r.email_public as number) ? (r.email as string) : null,
     sortOrder: (r.sort_order as number) ?? 100,
   }));
@@ -57,7 +57,7 @@ export async function getMyProfile(
     .prepare(
       `SELECT u.id as user_id, u.name as user_name, u.email as email,
               p.display_name, p.role_label, p.bio, p.skills, p.photo_url,
-              p.website, p.linkedin, p.public_visible, p.email_public,
+              p.website, p.instagram, p.public_visible, p.email_public,
               p.sort_order, p.updated_at
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
@@ -75,7 +75,7 @@ export async function getMyProfile(
     skills: (r.skills as string) ?? null,
     photoUrl: (r.photo_url as string) ?? null,
     website: (r.website as string) ?? null,
-    linkedin: (r.linkedin as string) ?? null,
+    instagram: (r.instagram as string) ?? null,
     publicVisible: Boolean((r.public_visible as number) ?? 1),
     emailPublic: Boolean((r.email_public as number) ?? 0),
     sortOrder: (r.sort_order as number) ?? 100,
@@ -90,7 +90,7 @@ export interface UpdateProfileInput {
   skills?: string;
   photoUrl?: string;
   website?: string;
-  linkedin?: string;
+  instagram?: string;
   publicVisible?: boolean;
   emailPublic?: boolean;
 }
@@ -110,7 +110,7 @@ export async function upsertProfile(
     skills: trim(input.skills, 200),
     photoUrl: trim(input.photoUrl, 500),
     website: trim(input.website, 200),
-    linkedin: trim(input.linkedin, 200),
+    instagram: trim(input.instagram, 200),
     publicVisible: input.publicVisible ?? true,
     emailPublic: input.emailPublic ?? false,
   };
