@@ -1,0 +1,113 @@
+---
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { listAllMembers } from "../../../server/admin";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+const all = db ? await listAllMembers(db) : [];
+const soci = all.filter((m) => m.role === "admin" || m.role === "member");
+
+const QUOTA_ANNO_CORRENTE = 0; // Stato attuale: quota gratuita
+
+function fmtDate(s: string | null) {
+  if (!s) return "—";
+  try { return new Date(s).toLocaleDateString("it-IT"); } catch { return s; }
+}
+function fmtMoney(n: number | null) {
+  if (n == null) return "—";
+  return `€ ${n.toFixed(2).replace(".", ",")}`;
+}
+
+const inRegola = soci.filter((m) =>
+  QUOTA_ANNO_CORRENTE === 0 || (m.lastPaymentAmount ?? 0) >= QUOTA_ANNO_CORRENTE
+);
+const insolventi = soci.filter((m) =>
+  QUOTA_ANNO_CORRENTE > 0 && (m.lastPaymentAmount ?? 0) < QUOTA_ANNO_CORRENTE
+);
+const totaleIncassato = soci.reduce((sum, m) => sum + (m.lastPaymentAmount ?? 0), 0);
+const today = new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" });
+const annoCorrente = new Date().getFullYear();
+---
+
+<AreaSociLayout title="Registro quote — Amministrazione" active="quote">
+  <div class="flex flex-wrap items-baseline justify-between gap-4 print:hidden">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Registro quote associative</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Stato delle quote per l'anno {annoCorrente}. Aggiornato al {today}.
+      </p>
+    </div>
+    <button onclick="window.print()" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-dark hover:border-nx-cyan hover:text-nx-cyan">
+      🖨 Stampa
+    </button>
+  </div>
+
+  <!-- Riepilogo -->
+  <div class="mt-6 grid gap-4 sm:grid-cols-3">
+    <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+      <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Quota anno {annoCorrente}</p>
+      <p class="mt-2 text-3xl font-black text-nx-dark">{fmtMoney(QUOTA_ANNO_CORRENTE)}</p>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        {QUOTA_ANNO_CORRENTE === 0 ? "Nessuna quota richiesta. Tutti i soci sono in pari." : "Importo deliberato dall'assemblea."}
+      </p>
+    </div>
+    <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+      <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">In regola</p>
+      <p class="mt-2 text-3xl font-black text-emerald-700">{inRegola.length}</p>
+      <p class="mt-1 text-xs text-nx-gray-dark">su {soci.length} soci totali</p>
+    </div>
+    <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+      <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Totale incassato</p>
+      <p class="mt-2 text-3xl font-black text-nx-dark">{fmtMoney(totaleIncassato)}</p>
+      <p class="mt-1 text-xs text-nx-gray-dark">somma versamenti registrati</p>
+    </div>
+  </div>
+
+  <h1 class="hidden text-2xl font-bold print:block">Registro quote NexLudica APS — {today}</h1>
+
+  <div class="mt-8 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white">
+    <table class="w-full text-sm">
+      <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+        <tr>
+          <th class="px-3 py-3 text-left">#</th>
+          <th class="px-3 py-3 text-left">Socio</th>
+          <th class="px-3 py-3 text-left">Iscritto dal</th>
+          <th class="px-3 py-3 text-left">Ultima quota</th>
+          <th class="px-3 py-3 text-left">Importo</th>
+          <th class="px-3 py-3 text-left">Stato</th>
+          <th class="px-3 py-3 text-left">Note</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-nx-gray-light/20">
+        {soci.map((m, i) => {
+          const inRegola = QUOTA_ANNO_CORRENTE === 0 || (m.lastPaymentAmount ?? 0) >= QUOTA_ANNO_CORRENTE;
+          return (
+            <tr>
+              <td class="px-3 py-3 text-nx-gray-dark">{i + 1}</td>
+              <td class="px-3 py-3 font-medium text-nx-dark">{m.name}</td>
+              <td class="px-3 py-3 text-xs text-nx-gray-dark">{fmtDate(m.membershipDate)}</td>
+              <td class="px-3 py-3 text-xs text-nx-gray-dark">{fmtDate(m.lastPaymentDate)}</td>
+              <td class="px-3 py-3 font-mono text-xs text-nx-dark">{fmtMoney(m.lastPaymentAmount)}</td>
+              <td class="px-3 py-3 text-xs">
+                {inRegola ? (
+                  <span class="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">In regola</span>
+                ) : (
+                  <span class="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Da saldare</span>
+                )}
+              </td>
+              <td class="px-3 py-3 text-xs text-nx-gray-dark">{m.paymentNotes ?? "—"}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  </div>
+</AreaSociLayout>

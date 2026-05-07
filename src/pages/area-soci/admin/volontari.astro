@@ -1,0 +1,91 @@
+---
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { listAllMembers } from "../../../server/admin";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+const all = db ? await listAllMembers(db) : [];
+// Stato attuale: tutti i soci attivi sono volontari.
+const volontari = all.filter((m) => m.active && (m.role === "admin" || m.role === "member"));
+
+function fmt(s: string | null) { return s && s.trim() ? s : "—"; }
+function fmtDate(s: string | null) {
+  if (!s) return "—";
+  try { return new Date(s).toLocaleDateString("it-IT"); } catch { return s; }
+}
+const today = new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" });
+---
+
+<AreaSociLayout title="Registro volontari — Amministrazione" active="volontari">
+  <div class="flex flex-wrap items-baseline justify-between gap-4 print:hidden">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Registro dei volontari</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Volontari iscritti al registro tenuto ai sensi dell'art. 17 del D.Lgs 117/2017 (Codice del Terzo Settore).
+        Aggiornato al {today}.
+      </p>
+    </div>
+    <button onclick="window.print()" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-dark hover:border-nx-cyan hover:text-nx-cyan">
+      🖨 Stampa
+    </button>
+  </div>
+
+  <div class="mt-6 rounded-lg border border-nx-cyan/30 bg-nx-cyan-light/40 p-4 text-sm text-nx-dark print:hidden">
+    <strong>Stato attuale:</strong> tutti i soci attivi prestano servizio come volontari non occasionali.
+    Eventuali volontari occasionali andranno annotati separatamente quando previsti.
+  </div>
+
+  <h1 class="hidden text-2xl font-bold print:block">Registro volontari NexLudica APS — {today}</h1>
+
+  <div class="mt-6 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white">
+    <table class="w-full text-sm">
+      <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+        <tr>
+          <th class="px-3 py-3 text-left">#</th>
+          <th class="px-3 py-3 text-left">Cognome e nome</th>
+          <th class="px-3 py-3 text-left">Codice fiscale</th>
+          <th class="px-3 py-3 text-left">Nato/a il</th>
+          <th class="px-3 py-3 text-left">Residenza</th>
+          <th class="px-3 py-3 text-left">Data inizio attività</th>
+          <th class="px-3 py-3 text-left">Tipologia</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-nx-gray-light/20">
+        {volontari.map((m, i) => (
+          <tr>
+            <td class="px-3 py-3 text-nx-gray-dark">{i + 1}</td>
+            <td class="px-3 py-3 font-medium text-nx-dark">{m.name}</td>
+            <td class="px-3 py-3 font-mono text-xs uppercase text-nx-gray-dark">{fmt(m.fiscalCode)}</td>
+            <td class="px-3 py-3 text-xs text-nx-gray-dark">
+              {fmtDate(m.birthDate)}
+              {m.birthPlace && <span> a {m.birthPlace}</span>}
+            </td>
+            <td class="px-3 py-3 text-xs text-nx-gray-dark">
+              {m.address && <div>{m.address}</div>}
+              {(m.postalCode || m.city || m.province) && (
+                <div>{[m.postalCode, m.city, m.province && `(${m.province})`].filter(Boolean).join(" ")}</div>
+              )}
+              {!m.address && !m.city && <span>—</span>}
+            </td>
+            <td class="px-3 py-3 text-xs text-nx-gray-dark">{fmtDate(m.membershipDate)}</td>
+            <td class="px-3 py-3 text-xs">
+              <span class="inline-flex rounded-full bg-nx-cyan-light px-2 py-0.5 text-[10px] font-semibold uppercase text-nx-cyan">
+                Non occasionale
+              </span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="mt-4 text-xs text-nx-gray-dark">Totale volontari: <strong class="text-nx-dark">{volontari.length}</strong></p>
+</AreaSociLayout>

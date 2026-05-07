@@ -19,17 +19,13 @@ if (user) {
 }
 ---
 
-<BaseLayout title="Accedi — NexLudica APS" description="Accesso area soci NexLudica con magic link via email.">
+<BaseLayout title="Accedi — NexLudica APS" description="Accesso area soci NexLudica.">
   <section class="bg-nx-off-white px-4 pb-16 pt-28">
     <div class="mx-auto max-w-md">
       <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Area Soci</p>
       <h1 class="mt-4 text-4xl font-black tracking-tight text-nx-dark sm:text-5xl" style="font-family: var(--font-display);">
         Accedi
       </h1>
-      <p class="mt-4 text-base text-nx-gray-dark">
-        Inserisci la tua email da socio: ti invieremo un link per accedere.
-        Niente password, scade dopo 15 minuti.
-      </p>
 
       {errorMsg && (
         <div class="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -37,24 +33,55 @@ if (user) {
         </div>
       )}
 
-      <form id="login-form" class="mt-8 space-y-4">
+      <!-- Tab switcher -->
+      <div class="mt-8 grid grid-cols-2 rounded-lg bg-nx-gray-light/20 p-1 text-sm">
+        <button id="tab-magic" class="rounded-md bg-white px-3 py-2 font-semibold text-nx-dark shadow-sm transition">
+          Magic link
+        </button>
+        <button id="tab-password" class="rounded-md px-3 py-2 font-semibold text-nx-gray-dark transition hover:text-nx-dark">
+          Password
+        </button>
+      </div>
+
+      <!-- Magic link form -->
+      <form id="magic-form" class="mt-6 space-y-4">
         <div>
-          <label for="email" class="block text-sm font-medium text-nx-dark">Email</label>
+          <label for="magic-email" class="block text-sm font-medium text-nx-dark">Email</label>
           <input
-            type="email"
-            id="email"
-            name="email"
-            required
-            autocomplete="email"
-            placeholder="tua.email@nexludica.org"
+            type="email" id="magic-email" name="email" required autocomplete="email"
+            placeholder="la-tua-email@esempio.it"
             class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-3 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
           />
         </div>
-        <button
-          type="submit"
-          class="w-full rounded-lg bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50"
-        >
+        <p class="text-xs text-nx-gray-dark">Ti invieremo un link via email che scade dopo 15 minuti. Niente password da ricordare.</p>
+        <button type="submit"
+          class="w-full rounded-lg bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50">
           Invia il link
+        </button>
+      </form>
+
+      <!-- Password form -->
+      <form id="password-form" class="mt-6 hidden space-y-4">
+        <div>
+          <label for="pw-email" class="block text-sm font-medium text-nx-dark">Email</label>
+          <input
+            type="email" id="pw-email" name="email" required autocomplete="email"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-3 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+        </div>
+        <div>
+          <label for="pw-password" class="block text-sm font-medium text-nx-dark">Password</label>
+          <input
+            type="password" id="pw-password" name="password" required autocomplete="current-password"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-3 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+        </div>
+        <p class="text-xs text-nx-gray-dark">
+          Non hai impostato una password? <button type="button" id="switch-to-magic" class="text-nx-cyan no-underline hover:underline">Accedi con magic link</button> e impostala dal profilo.
+        </p>
+        <button type="submit"
+          class="w-full rounded-lg bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50">
+          Accedi
         </button>
       </form>
 
@@ -73,17 +100,42 @@ if (user) {
 
 <script is:inline>
   (function () {
-    const form = document.getElementById("login-form");
+    const tabMagic = document.getElementById("tab-magic");
+    const tabPwd = document.getElementById("tab-password");
+    const magicForm = document.getElementById("magic-form");
+    const pwdForm = document.getElementById("password-form");
     const ok = document.getElementById("login-result");
     const err = document.getElementById("login-error");
-    if (!form) return;
-    form.addEventListener("submit", async function (e) {
+    const switchToMagic = document.getElementById("switch-to-magic");
+
+    function showTab(which) {
+      ok.classList.add("hidden"); err.classList.add("hidden");
+      if (which === "magic") {
+        magicForm.classList.remove("hidden");
+        pwdForm.classList.add("hidden");
+        tabMagic.classList.add("bg-white", "text-nx-dark", "shadow-sm");
+        tabMagic.classList.remove("text-nx-gray-dark");
+        tabPwd.classList.remove("bg-white", "text-nx-dark", "shadow-sm");
+        tabPwd.classList.add("text-nx-gray-dark");
+      } else {
+        pwdForm.classList.remove("hidden");
+        magicForm.classList.add("hidden");
+        tabPwd.classList.add("bg-white", "text-nx-dark", "shadow-sm");
+        tabPwd.classList.remove("text-nx-gray-dark");
+        tabMagic.classList.remove("bg-white", "text-nx-dark", "shadow-sm");
+        tabMagic.classList.add("text-nx-gray-dark");
+      }
+    }
+    tabMagic.addEventListener("click", () => showTab("magic"));
+    tabPwd.addEventListener("click", () => showTab("password"));
+    switchToMagic.addEventListener("click", () => showTab("magic"));
+
+    magicForm.addEventListener("submit", async function (e) {
       e.preventDefault();
-      ok.classList.add("hidden");
-      err.classList.add("hidden");
-      const fd = new FormData(form);
+      ok.classList.add("hidden"); err.classList.add("hidden");
+      const fd = new FormData(magicForm);
       const email = String(fd.get("email") || "").trim();
-      const btn = form.querySelector("button[type=submit]");
+      const btn = magicForm.querySelector("button[type=submit]");
       btn.disabled = true;
       try {
         const res = await fetch("/api/auth/request-link", {
@@ -103,10 +155,39 @@ if (user) {
             dev.innerHTML = "Dev link: <a href=\"" + data.devLink + "\" class=\"underline\">" + data.devLink + "</a>";
             ok.appendChild(dev);
           }
-          form.reset();
+          magicForm.reset();
         }
       } catch (e) {
-        err.textContent = "Errore di rete: " + (e && e.message ? e.message : e);
+        err.textContent = "Errore di rete";
+        err.classList.remove("hidden");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    pwdForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      ok.classList.add("hidden"); err.classList.add("hidden");
+      const fd = new FormData(pwdForm);
+      const email = String(fd.get("email") || "").trim();
+      const password = String(fd.get("password") || "");
+      const btn = pwdForm.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          err.textContent = data.error || "Credenziali non valide.";
+          err.classList.remove("hidden");
+        } else {
+          window.location.href = data.redirect || "/area-soci";
+        }
+      } catch (e) {
+        err.textContent = "Errore di rete";
         err.classList.remove("hidden");
       } finally {
         btn.disabled = false;

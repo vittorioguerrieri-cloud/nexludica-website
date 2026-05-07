@@ -14,6 +14,7 @@
 import type { APIContext } from "astro";
 import { getDb, getEnv, now, secureToken, uuid } from "./db";
 import type { UserRow } from "./db";
+import { hashPassword, verifyPassword } from "./password";
 
 const SESSION_COOKIE = "nx_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 giorni
@@ -211,6 +212,53 @@ export async function findUserByEmail(
     .bind(email.trim())
     .first<UserRow>();
   return row ?? null;
+}
+
+/**
+ * Imposta o aggiorna la password dell'utente.
+ * Hash con PBKDF2-SHA-256 100k.
+ */
+export async function setPassword(
+  db: D1Database,
+  userId: string,
+  password: string,
+): Promise<void> {
+  const hash = await hashPassword(password);
+  await db
+    .prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+    .bind(hash, userId)
+    .run();
+}
+
+/**
+ * Rimuove la password (l'utente potra' loggarsi solo via magic link).
+ */
+export async function removePassword(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare("UPDATE users SET password_hash = NULL WHERE id = ?")
+    .bind(userId)
+    .run();
+}
+
+/**
+ * Login con email + password. Ritorna l'user_id se le credenziali sono
+ * valide e l'utente e' attivo, altrimenti null. Risposta uniforme per
+ * evitare enumeration.
+ */
+export async function loginWithPassword(
+  db: D1Database,
+  email: string,
+  password: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      "SELECT id, password_hash FROM users WHERE LOWER(email) = LOWER(?) AND active = 1",
+    )
+    .bind(email.trim())
+    .first<{ id: string; password_hash: string | null }>();
+  if (!row || !row.password_hash) return null;
+  const ok = await verifyPassword(password, row.password_hash);
+  return ok ? row.id : null;
 }
 
 /**

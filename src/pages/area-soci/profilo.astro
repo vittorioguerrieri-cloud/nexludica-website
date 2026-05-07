@@ -114,7 +114,105 @@ if (db) {
       </div>
     </form>
   </div>
+
+  <!-- Sezione sicurezza: imposta/cambia/rimuovi password -->
+  <div class="mt-8 rounded-xl border border-nx-gray-light/20 bg-white p-8">
+    <h2 class="text-2xl font-bold text-nx-dark">Sicurezza</h2>
+    <p class="mt-2 text-sm text-nx-gray-dark">
+      Di default accedi via magic link inviato all'email. Se preferisci, puoi
+      impostare una password e usarla per accedere più rapidamente.
+    </p>
+
+    <form id="password-form" class="mt-6 space-y-4">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="new-password" class="block text-sm font-medium text-nx-dark">Nuova password</label>
+          <input
+            type="password" id="new-password" name="password" required minlength="8" autocomplete="new-password"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+          <p class="mt-1 text-xs text-nx-gray-dark">Almeno 8 caratteri.</p>
+        </div>
+        <div>
+          <label for="confirm-password" class="block text-sm font-medium text-nx-dark">Conferma password</label>
+          <input
+            type="password" id="confirm-password" name="confirm" required minlength="8" autocomplete="new-password"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+          />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <button type="submit" class="rounded-lg bg-nx-dark px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white transition hover:bg-nx-blue-deep">
+          Imposta password
+        </button>
+        <button type="button" id="remove-password-btn" class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-red-700">
+          Rimuovi password
+        </button>
+        <span id="password-status" class="text-sm"></span>
+      </div>
+    </form>
+  </div>
 </AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("password-form");
+    const status = document.getElementById("password-status");
+    const removeBtn = document.getElementById("remove-password-btn");
+    if (!form) return;
+    form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const password = String(fd.get("password") || "");
+      const confirm = String(fd.get("confirm") || "");
+      if (password !== confirm) {
+        status.textContent = "Le due password non coincidono";
+        status.className = "text-sm text-red-600";
+        return;
+      }
+      status.textContent = "Salvataggio...";
+      status.className = "text-sm text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/me/password", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = "Errore: " + (data.error || res.status);
+          status.className = "text-sm text-red-600";
+        } else {
+          status.textContent = "✓ Password impostata. Puoi usarla per accedere.";
+          status.className = "text-sm text-emerald-600";
+          form.reset();
+        }
+      } catch (e) {
+        status.textContent = "Errore di rete";
+        status.className = "text-sm text-red-600";
+      }
+    });
+    removeBtn.addEventListener("click", async function () {
+      if (!confirm("Rimuovere la password? Potrai accedere solo via magic link.")) return;
+      status.textContent = "Rimozione...";
+      status.className = "text-sm text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/me/password", { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = "Errore: " + (data.error || res.status);
+          status.className = "text-sm text-red-600";
+        } else {
+          status.textContent = "✓ Password rimossa";
+          status.className = "text-sm text-emerald-600";
+        }
+      } catch (e) {
+        status.textContent = "Errore di rete";
+        status.className = "text-sm text-red-600";
+      }
+    });
+  })();
+</script>
 
 <script is:inline>
   (function () {
