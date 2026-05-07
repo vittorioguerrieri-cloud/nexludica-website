@@ -128,40 +128,53 @@ const team =
         <p class="mt-4 text-nx-gray-dark leading-relaxed">
           Soci e collaboratori di NexLudica con le rispettive aree di competenza.
         </p>
-        <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {team.map((p) => (
-            <article class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
-              <div class="flex items-center gap-3">
+            <article class="group overflow-hidden rounded-2xl border border-nx-gray-light/20 bg-white transition hover:-translate-y-1 hover:shadow-lg">
+              <div class="relative aspect-square overflow-hidden bg-nx-off-white">
                 {p.photoUrl ? (
-                  <img src={p.photoUrl} alt="" class="h-12 w-12 shrink-0 rounded-full object-cover" loading="lazy" />
+                  <img
+                    src={p.photoUrl}
+                    alt={p.name}
+                    class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                    loading="lazy"
+                  />
                 ) : (
-                  <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-sm font-bold text-nx-cyan">
-                    {p.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
+                  <div class="flex h-full w-full items-center justify-center bg-nx-cyan-light">
+                    <span class="text-6xl font-black text-nx-cyan">
+                      {p.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
+                    </span>
                   </div>
                 )}
-                <div class="min-w-0">
-                  <p class="truncate text-base font-semibold text-nx-dark">{p.name}</p>
-                  {p.roleLabel && (
-                    <p class="truncate text-xs uppercase tracking-wider text-nx-cyan">{p.roleLabel}</p>
-                  )}
-                </div>
+                {p.roleLabel && (
+                  <span class="absolute left-4 top-4 rounded-full bg-nx-cyan px-3 py-1 text-xs font-bold uppercase tracking-wider text-white shadow-md">
+                    {p.roleLabel}
+                  </span>
+                )}
               </div>
-              {p.skills && (
-                <p class="mt-3 text-xs text-nx-gray-dark">{p.skills}</p>
-              )}
-              {p.bio && (
-                <p class="mt-2 text-sm text-nx-gray-dark line-clamp-3">{p.bio}</p>
-              )}
-              {(p.website || p.linkedin) && (
-                <div class="mt-3 flex flex-wrap gap-3 text-xs">
-                  {p.website && (
-                    <a href={p.website} target="_blank" rel="noopener noreferrer" class="text-nx-cyan no-underline hover:underline">Sito</a>
-                  )}
-                  {p.linkedin && (
-                    <a href={p.linkedin} target="_blank" rel="noopener noreferrer" class="text-nx-cyan no-underline hover:underline">LinkedIn</a>
-                  )}
-                </div>
-              )}
+              <div class="p-5">
+                <p class="text-lg font-bold text-nx-dark">{p.name}</p>
+                {p.skills && (
+                  <p class="mt-1 text-xs text-nx-gray-dark">{p.skills}</p>
+                )}
+                {p.bio && (
+                  <p class="mt-3 text-sm text-nx-gray-dark line-clamp-4">{p.bio}</p>
+                )}
+                {(p.website || p.linkedin) && (
+                  <div class="mt-4 flex flex-wrap gap-3 text-xs">
+                    {p.website && (
+                      <a href={p.website} target="_blank" rel="noopener noreferrer" class="font-semibold text-nx-cyan no-underline hover:underline">
+                        Sito web →
+                      </a>
+                    )}
+                    {p.linkedin && (
+                      <a href={p.linkedin} target="_blank" rel="noopener noreferrer" class="font-semibold text-nx-cyan no-underline hover:underline">
+                        LinkedIn →
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
             </article>
           ))}
         </div>
