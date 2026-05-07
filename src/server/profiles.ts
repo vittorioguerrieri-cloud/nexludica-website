@@ -116,19 +116,21 @@ export async function upsertProfile(
   };
 
   // INSERT ... ON CONFLICT(user_id) DO UPDATE per upsert.
+  // photo_url usa COALESCE: salvataggio profilo non azzera la foto
+  // se il chiamante non la include esplicitamente.
   await db
     .prepare(
       `INSERT INTO profiles
-        (user_id, display_name, role_label, bio, skills, photo_url, website, linkedin, public_visible, email_public, sort_order, updated_at)
+        (user_id, display_name, role_label, bio, skills, photo_url, website, instagram, public_visible, email_public, sort_order, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT sort_order FROM profiles WHERE user_id = ?), 100), ?)
        ON CONFLICT(user_id) DO UPDATE SET
          display_name = excluded.display_name,
          role_label = excluded.role_label,
          bio = excluded.bio,
          skills = excluded.skills,
-         photo_url = excluded.photo_url,
+         photo_url = COALESCE(excluded.photo_url, photo_url),
          website = excluded.website,
-         linkedin = excluded.linkedin,
+         instagram = excluded.instagram,
          public_visible = excluded.public_visible,
          email_public = excluded.email_public,
          updated_at = excluded.updated_at`,
