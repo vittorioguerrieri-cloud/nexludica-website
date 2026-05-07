@@ -25,12 +25,12 @@ export interface Article {
   tags?: string[];
 }
 
-/** Restituisce l'ultimo giovedì del mese specificato. */
+/** Restituisce l'ultimo giovedì del mese specificato (alle 19:00). */
 function lastThursdayOfMonth(year: number, month: number): Date {
   const lastDay = new Date(year, month + 1, 0);
   const dayOfWeek = lastDay.getDay();
   const offset = (dayOfWeek - 4 + 7) % 7;
-  return new Date(year, month, lastDay.getDate() - offset, 20, 30);
+  return new Date(year, month, lastDay.getDate() - offset, 19, 0);
 }
 
 /**
