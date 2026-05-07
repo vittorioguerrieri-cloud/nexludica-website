@@ -36,7 +36,7 @@ export const POST: APIRoute = async (ctx) => {
   if (!["admin", "member", "collaborator"].includes(role)) {
     return json({ error: "invalid role" }, 400);
   }
-  const created = await createMember(db, email, name, role);
+  const created = await createMember(db, email, name, role, env);
   return json({ ok: true, user: created });
 };
 

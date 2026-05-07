@@ -48,7 +48,7 @@ export const PUT: APIRoute = async (ctx) => {
     const n = Number(body.lastPaymentAmount);
     input.lastPaymentAmount = Number.isFinite(n) ? n : null;
   }
-  await updateMemberAsAdmin(db, user.id, id, input);
+  await updateMemberAsAdmin(db, user.id, id, input, env);
   const member = await getMemberById(db, id);
   return json({ ok: true, member });
 };

@@ -4,6 +4,7 @@
  * usano queste funzioni.
  */
 import { now, type UserRow } from "./db";
+import { grantEditor, revokeAccess } from "./drive";
 
 export type Role = "admin" | "member" | "collaborator";
 export type MembershipStatus = "active" | "pending" | "suspended" | "former";
@@ -177,9 +178,17 @@ export async function updateMemberAsAdmin(
   adminUserId: string,
   userId: string,
   input: UpdateMemberInput,
+  env?: Env,
 ): Promise<void> {
   const trim = (s: string | undefined, max: number) =>
     s == null ? null : (s.trim().slice(0, max) || null);
+
+  // Carica il record corrente per sapere il vecchio role / email (necessario
+  // per sincronizzare i permessi Drive quando il role cambia).
+  const before = await db
+    .prepare("SELECT role, email FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ role: Role; email: string }>();
 
   // 1) Update users.role + active se forniti
   const userSets: string[] = [];
@@ -198,6 +207,11 @@ export async function updateMemberAsAdmin(
       .prepare(`UPDATE users SET ${userSets.join(", ")} WHERE id = ?`)
       .bind(...userVals)
       .run();
+  }
+
+  // Sync permessi Drive sulla cartella radice se il ruolo e' cambiato.
+  if (env && before && input.role && input.role !== before.role) {
+    await syncDriveEditorPermission(env, before.email, before.role, input.role);
   }
 
   // 2) Update profiles.role_label se fornito
@@ -278,13 +292,15 @@ export async function createMember(
   email: string,
   name: string,
   role: Role,
+  env?: Env,
 ): Promise<UserRow> {
   const id = crypto.randomUUID();
+  const cleanEmail = email.toLowerCase().trim();
   await db
     .prepare(
       "INSERT INTO users (id, email, name, role, active, created_at) VALUES (?, ?, ?, ?, 1, ?)",
     )
-    .bind(id, email.toLowerCase().trim(), name.trim(), role, now())
+    .bind(id, cleanEmail, name.trim(), role, now())
     .run();
   await db
     .prepare(
@@ -293,13 +309,74 @@ export async function createMember(
     )
     .bind(id, name.trim(), now())
     .run();
+  // Se il nuovo utente e' admin, dagli accesso editor alla cartella Drive.
+  if (env && role === "admin") {
+    await syncDriveEditorPermission(env, cleanEmail, "member", "admin");
+  }
   return {
     id,
-    email: email.toLowerCase().trim(),
+    email: cleanEmail,
     name: name.trim(),
     role,
     active: 1,
     created_at: now(),
     last_login_at: null,
   };
+}
+
+/**
+ * Sincronizza il permesso editor sulla cartella Drive radice in base al
+ * ruolo. Quando un utente diventa admin -> grant editor; quando smette di
+ * essere admin -> revoke. Email .invalid (placeholder seed) sono skippate.
+ */
+async function syncDriveEditorPermission(
+  env: Env,
+  email: string,
+  oldRole: Role,
+  newRole: Role,
+): Promise<void> {
+  const root = env.DRIVE_ROOT_FOLDER_ID;
+  if (!root) return;
+  if (!email || email.endsWith(".invalid")) return;
+  try {
+    if (newRole === "admin" && oldRole !== "admin") {
+      const r = await grantEditor(env, root, email);
+      if (!r.ok) console.error("[admin] grantEditor failed for", email, r.error);
+    } else if (oldRole === "admin" && newRole !== "admin") {
+      await revokeAccess(env, root, email);
+    }
+  } catch (e) {
+    console.error("[admin] syncDriveEditorPermission error:", e);
+  }
+}
+
+/**
+ * Sincronizzazione bulk: per tutti gli utenti admin attivi con email reale,
+ * assicura che abbiano permesso editor sulla cartella Drive radice.
+ * Idempotente: skippa quelli gia' editor.
+ */
+export async function syncAllAdminsToDrive(
+  db: D1Database,
+  env: Env,
+): Promise<{ granted: string[]; skipped: string[]; errors: string[] }> {
+  const granted: string[] = [];
+  const skipped: string[] = [];
+  const errors: string[] = [];
+  const root = env.DRIVE_ROOT_FOLDER_ID;
+  if (!root) return { granted, skipped, errors: ["DRIVE_ROOT_FOLDER_ID not set"] };
+
+  const rs = await db
+    .prepare("SELECT email FROM users WHERE role = 'admin' AND active = 1")
+    .all<{ email: string }>();
+  for (const row of rs.results) {
+    if (!row.email || row.email.endsWith(".invalid")) {
+      skipped.push(row.email);
+      continue;
+    }
+    const r = await grantEditor(env, root, row.email);
+    if (r.alreadyExists) skipped.push(row.email);
+    else if (r.ok) granted.push(row.email);
+    else errors.push(`${row.email}: ${r.error ?? "unknown"}`);
+  }
+  return { granted, skipped, errors };
 }

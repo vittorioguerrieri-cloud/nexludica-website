@@ -300,6 +300,90 @@ export async function makePublic(env: Env, fileId: string): Promise<void> {
 }
 
 /**
+ * Lista i permessi su un file/cartella Drive.
+ */
+export async function listPermissions(
+  env: Env,
+  fileId: string,
+): Promise<Array<{ id: string; emailAddress?: string; role: string; type: string }>> {
+  const token = await getAccessToken(env);
+  if (!token) return [];
+  const url = `${DRIVE_API}/files/${fileId}/permissions?fields=permissions(id,emailAddress,role,type)&supportsAllDrives=true`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    console.error("[drive] listPermissions failed:", await res.text());
+    return [];
+  }
+  const data = await res.json<{ permissions: Array<{ id: string; emailAddress?: string; role: string; type: string }> }>();
+  return data.permissions ?? [];
+}
+
+/**
+ * Aggiunge una permission "writer" a una email su un file/cartella.
+ * Idempotente: se gia' esiste come writer, no-op.
+ * sendNotificationEmail=false per non spammare.
+ */
+export async function grantEditor(
+  env: Env,
+  fileId: string,
+  email: string,
+): Promise<{ ok: boolean; alreadyExists?: boolean; error?: string }> {
+  if (!email || email.endsWith(".invalid")) return { ok: false, error: "invalid email" };
+  const token = await getAccessToken(env);
+  if (!token) return { ok: false, error: "no token" };
+
+  // Check existing
+  const existing = await listPermissions(env, fileId);
+  const match = existing.find(
+    (p) => p.emailAddress?.toLowerCase() === email.toLowerCase() && p.role === "writer",
+  );
+  if (match) return { ok: true, alreadyExists: true };
+
+  const res = await fetch(
+    `${DRIVE_API}/files/${fileId}/permissions?supportsAllDrives=true&sendNotificationEmail=false`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ role: "writer", type: "user", emailAddress: email }),
+    },
+  );
+  if (!res.ok) {
+    const txt = await res.text();
+    console.error("[drive] grantEditor failed:", txt);
+    return { ok: false, error: txt };
+  }
+  return { ok: true };
+}
+
+/**
+ * Rimuove la permission di una email su un file/cartella (se presente).
+ */
+export async function revokeAccess(
+  env: Env,
+  fileId: string,
+  email: string,
+): Promise<{ ok: boolean; removed?: boolean }> {
+  const token = await getAccessToken(env);
+  if (!token) return { ok: false };
+  const existing = await listPermissions(env, fileId);
+  const match = existing.find(
+    (p) => p.emailAddress?.toLowerCase() === email.toLowerCase(),
+  );
+  if (!match) return { ok: true, removed: false };
+  const res = await fetch(
+    `${DRIVE_API}/files/${fileId}/permissions/${match.id}?supportsAllDrives=true`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  return { ok: res.ok, removed: res.ok };
+}
+
+/**
  * Elimina un file/cartella.
  */
 export async function deleteFile(env: Env, fileId: string): Promise<boolean> {
