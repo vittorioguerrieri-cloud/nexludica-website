@@ -1,0 +1,194 @@
+---
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { getMemberById } from "../../../server/admin";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const id = Astro.params.id as string;
+const env = await getEnv();
+const db = getDb(env as Env);
+const member = db ? await getMemberById(db, id) : null;
+if (!member) return Astro.redirect("/area-soci/admin");
+
+const valOr = (s: string | null) => s ?? "";
+---
+
+<AreaSociLayout title={`${member.name} — Amministrazione`} active="admin">
+  <a href="/area-soci/admin" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">
+    ← Torna alla lista
+  </a>
+
+  <div class="mt-4 flex items-center gap-4">
+    {member.photoUrl ? (
+      <img src={member.photoUrl} alt="" class="h-16 w-16 rounded-full object-cover" />
+    ) : (
+      <span class="flex h-16 w-16 items-center justify-center rounded-full bg-nx-cyan-light text-lg font-bold text-nx-cyan">
+        {member.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
+      </span>
+    )}
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">{member.name}</h2>
+      <p class="text-sm text-nx-gray-dark">{member.email}</p>
+    </div>
+  </div>
+
+  <form id="member-form" class="mt-8 space-y-8">
+    <!-- Ruolo + stato -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Ruolo e stato</h3>
+      <div class="mt-4 grid gap-5 sm:grid-cols-3">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ruolo</label>
+          <select name="role" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
+            <option value="admin"        selected={member.role === "admin"}>Admin (Presidente)</option>
+            <option value="member"       selected={member.role === "member"}>Socio</option>
+            <option value="collaborator" selected={member.role === "collaborator"}>Collaboratore</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Stato iscrizione</label>
+          <select name="membershipStatus" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
+            <option value="active"     selected={member.membershipStatus === "active"}>Attivo</option>
+            <option value="pending"    selected={member.membershipStatus === "pending"}>In attesa</option>
+            <option value="suspended"  selected={member.membershipStatus === "suspended"}>Sospeso</option>
+            <option value="former"     selected={member.membershipStatus === "former"}>Ex socio</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Etichetta ruolo (pubblica)</label>
+          <input name="roleLabel" value={valOr(member.roleLabel)} placeholder="es. Presidente" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Anagrafica -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Anagrafica</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Riservata: visibile solo agli admin.</p>
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Codice fiscale</label>
+          <input name="fiscalCode" value={valOr(member.fiscalCode)} maxlength="32" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm uppercase" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Telefono</label>
+          <input name="phone" value={valOr(member.phone)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Data di nascita</label>
+          <input type="date" name="birthDate" value={valOr(member.birthDate)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Luogo di nascita</label>
+          <input name="birthPlace" value={valOr(member.birthPlace)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Residenza -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Residenza</h3>
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Indirizzo</label>
+          <input name="address" value={valOr(member.address)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Comune</label>
+          <input name="city" value={valOr(member.city)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">CAP</label>
+          <input name="postalCode" value={valOr(member.postalCode)} maxlength="16" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Provincia</label>
+          <input name="province" value={valOr(member.province)} maxlength="4" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm uppercase" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Paese</label>
+          <input name="country" value={member.country ?? "IT"} maxlength="4" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm uppercase" />
+        </div>
+      </div>
+    </section>
+
+    <!-- Iscrizione e quote -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Iscrizione e quote</h3>
+      <div class="mt-4 grid gap-5 sm:grid-cols-3">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Data iscrizione</label>
+          <input type="date" name="membershipDate" value={valOr(member.membershipDate)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ultima quota — data</label>
+          <input type="date" name="lastPaymentDate" value={valOr(member.lastPaymentDate)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ultima quota — importo (€)</label>
+          <input type="number" step="0.01" name="lastPaymentAmount" value={member.lastPaymentAmount ?? ""} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div class="sm:col-span-3">
+          <label class="block text-sm font-medium text-nx-dark">Note pagamenti</label>
+          <textarea name="paymentNotes" rows="2" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">{valOr(member.paymentNotes)}</textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- Note interne -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Note interne</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Note ad uso del consiglio. Mai esposte pubblicamente.</p>
+      <textarea name="internalNotes" rows="4" class="mt-3 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">{valOr(member.internalNotes)}</textarea>
+    </section>
+
+    <div class="flex flex-wrap items-center gap-4">
+      <button type="submit" class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue">
+        Salva modifiche
+      </button>
+      <a href="/area-soci/admin" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">
+        Annulla
+      </a>
+      <span id="member-status" class="text-sm"></span>
+    </div>
+  </form>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ memberId: id }}>
+  (function () {
+    const form = document.getElementById("member-form");
+    const status = document.getElementById("member-status");
+    if (!form) return;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      status.textContent = "Salvataggio...";
+      status.className = "text-sm text-nx-gray-dark";
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      try {
+        const res = await fetch("/api/admin/members/" + encodeURIComponent(memberId), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = "Errore: " + (data.error || res.status);
+          status.className = "text-sm text-red-600";
+        } else {
+          status.textContent = "✓ Salvato";
+          status.className = "text-sm text-emerald-600";
+        }
+      } catch (e) {
+        status.textContent = "Errore di rete";
+        status.className = "text-sm text-red-600";
+      }
+    });
+  })();
+</script>

@@ -1,0 +1,204 @@
+---
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { listAllMembers, type AdminMemberView } from "../../../server/admin";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+let members: AdminMemberView[] = [];
+if (db) {
+  try {
+    members = await listAllMembers(db);
+  } catch (e) {
+    console.error("[admin] list members error:", e);
+  }
+}
+
+function fmt(s: string | null) {
+  return s && s.trim() ? s : "—";
+}
+function fmtDate(s: string | null) {
+  if (!s) return "—";
+  try {
+    return new Date(s).toLocaleDateString("it-IT");
+  } catch {
+    return s;
+  }
+}
+function fmtMoney(n: number | null) {
+  if (n == null) return "—";
+  return `€ ${n.toFixed(2).replace(".", ",")}`;
+}
+const roleLabels: Record<string, string> = {
+  admin: "Admin",
+  member: "Socio",
+  collaborator: "Collaboratore",
+};
+const statusLabels: Record<string, string> = {
+  active: "Attivo",
+  pending: "In attesa",
+  suspended: "Sospeso",
+  former: "Ex socio",
+};
+const statusColors: Record<string, string> = {
+  active: "bg-emerald-100 text-emerald-800",
+  pending: "bg-amber-100 text-amber-800",
+  suspended: "bg-red-100 text-red-800",
+  former: "bg-nx-gray-light/30 text-nx-gray-dark",
+};
+---
+
+<AreaSociLayout title="Amministrazione — Area Soci" active="admin">
+  <div class="flex flex-wrap items-baseline justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Soci e collaboratori</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Gestione completa di tutti gli associati. Visibile solo agli admin.
+      </p>
+    </div>
+    <button id="add-member-btn" class="rounded-lg bg-nx-cyan px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue">
+      + Nuovo
+    </button>
+  </div>
+
+  <!-- Modal nuovo socio -->
+  <div id="add-member-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+      <h3 class="text-lg font-bold text-nx-dark">Aggiungi socio o collaboratore</h3>
+      <form id="add-member-form" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Nome completo</label>
+          <input name="name" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Email</label>
+          <input type="email" name="email" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ruolo</label>
+          <select name="role" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">
+            <option value="member">Socio</option>
+            <option value="collaborator">Collaboratore</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="submit" class="flex-1 rounded-lg bg-nx-cyan px-4 py-2.5 text-sm font-bold uppercase tracking-wider text-white">
+            Crea
+          </button>
+          <button type="button" id="add-member-cancel" class="rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm font-semibold text-nx-gray-dark">
+            Annulla
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tabella soci -->
+  <div class="mt-8 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white">
+    <table class="w-full text-sm">
+      <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+        <tr>
+          <th class="px-4 py-3 text-left">Nome</th>
+          <th class="px-4 py-3 text-left">Email</th>
+          <th class="px-4 py-3 text-left">Ruolo</th>
+          <th class="px-4 py-3 text-left">Stato</th>
+          <th class="px-4 py-3 text-left">Iscrizione</th>
+          <th class="px-4 py-3 text-left">Ultima quota</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-nx-gray-light/20">
+        {members.map((m) => (
+          <tr class="transition hover:bg-nx-off-white">
+            <td class="px-4 py-3">
+              <div class="flex items-center gap-3">
+                {m.photoUrl ? (
+                  <img src={m.photoUrl} alt="" class="h-9 w-9 shrink-0 rounded-full object-cover" />
+                ) : (
+                  <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-xs font-bold text-nx-cyan">
+                    {m.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
+                  </span>
+                )}
+                <div class="min-w-0">
+                  <p class="truncate font-semibold text-nx-dark">{m.name}</p>
+                  {m.roleLabel && (
+                    <p class="truncate text-xs text-nx-gray-dark">{m.roleLabel}</p>
+                  )}
+                </div>
+              </div>
+            </td>
+            <td class="px-4 py-3 text-nx-gray-dark">{m.email}</td>
+            <td class="px-4 py-3">
+              <span class={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                m.role === "admin" ? "bg-nx-cyan-light text-nx-cyan"
+                : m.role === "member" ? "bg-blue-100 text-blue-800"
+                : "bg-purple-100 text-purple-800"
+              }`}>{roleLabels[m.role]}</span>
+            </td>
+            <td class="px-4 py-3">
+              <span class={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColors[m.membershipStatus]}`}>
+                {statusLabels[m.membershipStatus]}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-nx-gray-dark">{fmtDate(m.membershipDate)}</td>
+            <td class="px-4 py-3 text-nx-gray-dark">
+              <div>{fmtMoney(m.lastPaymentAmount)}</div>
+              <div class="text-xs">{fmtDate(m.lastPaymentDate)}</div>
+            </td>
+            <td class="px-4 py-3 text-right">
+              <a href={`/area-soci/admin/${m.id}`} class="text-xs font-semibold text-nx-cyan no-underline hover:underline">
+                Modifica →
+              </a>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="mt-4 text-xs text-nx-gray-dark">
+    Totale: {members.length} {members.length === 1 ? "persona" : "persone"} registrate.
+  </p>
+</AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    const btn = document.getElementById("add-member-btn");
+    const modal = document.getElementById("add-member-modal");
+    const cancel = document.getElementById("add-member-cancel");
+    const form = document.getElementById("add-member-form");
+    if (!btn || !modal || !cancel || !form) return;
+    btn.addEventListener("click", () => {
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+    });
+    cancel.addEventListener("click", () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      const res = await fetch("/api/admin/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        alert("Errore: " + (data.error || res.status));
+      } else {
+        window.location.reload();
+      }
+    });
+  })();
+</script>

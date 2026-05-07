@@ -4,7 +4,7 @@ import { getUser } from "../server/guards";
 
 export interface Props {
   title?: string;
-  active?: "dashboard" | "profilo" | "articoli" | "verbali";
+  active?: "dashboard" | "profilo" | "articoli" | "verbali" | "admin";
 }
 const { title = "Area Soci — NexLudica APS", active = "dashboard" } = Astro.props;
 
@@ -13,12 +13,15 @@ if (!user) {
   return Astro.redirect("/login");
 }
 
-const navItems = [
+const isAdmin = user.role === "admin";
+
+const navItems: Array<{ href: string; key: string; label: string; icon: string; adminOnly?: boolean }> = [
   { href: "/area-soci", key: "dashboard", label: "Dashboard", icon: "▣" },
   { href: "/area-soci/profilo", key: "profilo", label: "Il mio profilo", icon: "◔" },
   { href: "/area-soci/articoli", key: "articoli", label: "Articoli MeetLudica", icon: "✎" },
   { href: "/area-soci/verbali", key: "verbali", label: "Verbali e documenti", icon: "▤" },
-];
+  { href: "/area-soci/admin", key: "admin", label: "Amministrazione", icon: "⚙", adminOnly: true },
+].filter((it) => !it.adminOnly || isAdmin);
 ---
 
 <BaseLayout title={title} description="Area riservata ai soci NexLudica.">

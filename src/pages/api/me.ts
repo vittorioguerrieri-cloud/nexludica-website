@@ -40,6 +40,7 @@ export const PUT: APIRoute = async (ctx) => {
     website: optStr(body.website),
     linkedin: optStr(body.linkedin),
     publicVisible: optBool(body.publicVisible ?? body.public_visible),
+    emailPublic: optBool(body.emailPublic ?? body.email_public),
   });
   const profile = await getMyProfile(db, user.id);
   return json({ ok: true, profile });

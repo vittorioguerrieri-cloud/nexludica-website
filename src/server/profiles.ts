@@ -12,12 +12,14 @@ export interface PublicMember {
   photoUrl: string | null;
   website: string | null;
   linkedin: string | null;
+  email: string | null; // popolato solo se email_public = 1
   sortOrder: number;
 }
 
 export interface MyProfile extends PublicMember {
   email: string;
   publicVisible: boolean;
+  emailPublic: boolean;
   updatedAt: number;
 }
 
@@ -26,14 +28,13 @@ export async function listPublicMembers(db: D1Database): Promise<PublicMember[]>
     .prepare(
       `SELECT u.id as user_id, u.name as user_name, u.email as email,
               p.display_name, p.role_label, p.bio, p.skills, p.photo_url,
-              p.website, p.linkedin, p.sort_order
+              p.website, p.linkedin, p.sort_order, p.email_public
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        WHERE u.active = 1 AND COALESCE(p.public_visible, 1) = 1
        ORDER BY COALESCE(p.sort_order, 100) ASC, u.name ASC`,
     )
     .all();
-  // SQLite restituisce le colonne in lower-case con i nostri alias.
   return (rs.results as Array<Record<string, unknown>>).map((r) => ({
     userId: String(r.user_id),
     name: String(r.display_name ?? r.user_name ?? ""),
@@ -43,6 +44,7 @@ export async function listPublicMembers(db: D1Database): Promise<PublicMember[]>
     photoUrl: (r.photo_url as string) ?? null,
     website: (r.website as string) ?? null,
     linkedin: (r.linkedin as string) ?? null,
+    email: (r.email_public as number) ? (r.email as string) : null,
     sortOrder: (r.sort_order as number) ?? 100,
   }));
 }
@@ -55,7 +57,8 @@ export async function getMyProfile(
     .prepare(
       `SELECT u.id as user_id, u.name as user_name, u.email as email,
               p.display_name, p.role_label, p.bio, p.skills, p.photo_url,
-              p.website, p.linkedin, p.public_visible, p.sort_order, p.updated_at
+              p.website, p.linkedin, p.public_visible, p.email_public,
+              p.sort_order, p.updated_at
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        WHERE u.id = ? AND u.active = 1`,
@@ -74,6 +77,7 @@ export async function getMyProfile(
     website: (r.website as string) ?? null,
     linkedin: (r.linkedin as string) ?? null,
     publicVisible: Boolean((r.public_visible as number) ?? 1),
+    emailPublic: Boolean((r.email_public as number) ?? 0),
     sortOrder: (r.sort_order as number) ?? 100,
     updatedAt: (r.updated_at as number) ?? 0,
   };
@@ -88,6 +92,7 @@ export interface UpdateProfileInput {
   website?: string;
   linkedin?: string;
   publicVisible?: boolean;
+  emailPublic?: boolean;
 }
 
 export async function upsertProfile(
@@ -107,14 +112,15 @@ export async function upsertProfile(
     website: trim(input.website, 200),
     linkedin: trim(input.linkedin, 200),
     publicVisible: input.publicVisible ?? true,
+    emailPublic: input.emailPublic ?? false,
   };
 
   // INSERT ... ON CONFLICT(user_id) DO UPDATE per upsert.
   await db
     .prepare(
       `INSERT INTO profiles
-        (user_id, display_name, role_label, bio, skills, photo_url, website, linkedin, public_visible, sort_order, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT sort_order FROM profiles WHERE user_id = ?), 100), ?)
+        (user_id, display_name, role_label, bio, skills, photo_url, website, linkedin, public_visible, email_public, sort_order, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT sort_order FROM profiles WHERE user_id = ?), 100), ?)
        ON CONFLICT(user_id) DO UPDATE SET
          display_name = excluded.display_name,
          role_label = excluded.role_label,
@@ -124,6 +130,7 @@ export async function upsertProfile(
          website = excluded.website,
          linkedin = excluded.linkedin,
          public_visible = excluded.public_visible,
+         email_public = excluded.email_public,
          updated_at = excluded.updated_at`,
     )
     .bind(
@@ -136,6 +143,7 @@ export async function upsertProfile(
       data.website,
       data.linkedin,
       data.publicVisible ? 1 : 0,
+      data.emailPublic ? 1 : 0,
       userId,
       now(),
     )
