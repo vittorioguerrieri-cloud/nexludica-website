@@ -36,6 +36,10 @@ export const PUT: APIRoute = async (ctx) => {
   if (body.role) input.role = body.role as "admin" | "member" | "collaborator";
   if (body.active !== undefined) input.active = Boolean(body.active);
   if (body.roleLabel !== undefined) input.roleLabel = String(body.roleLabel);
+  // Toggle visibilità: la pagina invia "0"/"1" come stringhe.
+  const truthy = (v: unknown) => v === true || v === "1" || v === 1 || v === "true";
+  if (body.publicVisible !== undefined) input.publicVisible = truthy(body.publicVisible);
+  if (body.emailPublic !== undefined) input.emailPublic = truthy(body.emailPublic);
   for (const k of [
     "fiscalCode", "birthDate", "birthPlace", "phone",
     "address", "city", "postalCode", "province", "country",

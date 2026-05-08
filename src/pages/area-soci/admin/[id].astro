@@ -67,6 +67,26 @@ const valOr = (s: string | null) => s ?? "";
           <input name="roleLabel" value={valOr(member.roleLabel)} placeholder="es. Presidente" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
         </div>
       </div>
+
+      <!-- Override visibilità pubblica (solo admin) -->
+      <div class="mt-6 space-y-3 rounded-lg border border-nx-cyan/30 bg-nx-cyan-light/30 p-4">
+        <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Visibilità pubblica</p>
+        <p class="text-xs text-nx-gray-dark">
+          Override delle preferenze del socio. Normalmente è il socio stesso a gestirle dal suo profilo.
+        </p>
+        <label class="flex items-start gap-3">
+          <input type="checkbox" id="publicVisible" name="publicVisible" value="1"
+                 checked={member.publicVisible}
+                 class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-sm text-nx-dark">Mostra il profilo nella pagina "Chi siamo"</span>
+        </label>
+        <label class="flex items-start gap-3">
+          <input type="checkbox" id="emailPublic" name="emailPublic" value="1"
+                 checked={member.emailPublic}
+                 class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-sm text-nx-dark">Mostra anche l'email sulla pagina pubblica</span>
+        </label>
+      </div>
     </section>
 
     <!-- Anagrafica -->
@@ -173,6 +193,9 @@ const valOr = (s: string | null) => s ?? "";
       status.className = "text-sm text-nx-gray-dark";
       const fd = new FormData(form);
       const body = Object.fromEntries(fd.entries());
+      // Checkbox: vengono inclusi solo se selezionati
+      body.publicVisible = fd.has("publicVisible") ? "1" : "0";
+      body.emailPublic = fd.has("emailPublic") ? "1" : "0";
       try {
         const res = await fetch("/api/admin/members/" + encodeURIComponent(memberId), {
           method: "PUT",

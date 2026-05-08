@@ -155,6 +155,8 @@ export interface UpdateMemberInput {
   active?: boolean;
   // profile
   roleLabel?: string;
+  publicVisible?: boolean;
+  emailPublic?: boolean;
   // member_data
   fiscalCode?: string;
   birthDate?: string;
@@ -214,15 +216,38 @@ export async function updateMemberAsAdmin(
     await syncDriveEditorPermission(env, before.email, before.role, input.role);
   }
 
-  // 2) Update profiles.role_label se fornito
+  // 2) Update campi profilo che l'admin puo' settare:
+  //    role_label, public_visible, email_public.
+  const profileSets: string[] = [];
+  const profileVals: unknown[] = [];
   if (input.roleLabel !== undefined) {
+    profileSets.push("role_label = ?");
+    profileVals.push(trim(input.roleLabel, 80));
+  }
+  if (input.publicVisible !== undefined) {
+    profileSets.push("public_visible = ?");
+    profileVals.push(input.publicVisible ? 1 : 0);
+  }
+  if (input.emailPublic !== undefined) {
+    profileSets.push("email_public = ?");
+    profileVals.push(input.emailPublic ? 1 : 0);
+  }
+  if (profileSets.length > 0) {
+    // Se la riga profile non esiste ancora, inserimento di base
     await db
       .prepare(
-        `INSERT INTO profiles (user_id, display_name, role_label, public_visible, email_public, sort_order, updated_at)
-         VALUES (?, (SELECT name FROM users WHERE id = ?), ?, 1, 0, 100, ?)
-         ON CONFLICT(user_id) DO UPDATE SET role_label = excluded.role_label, updated_at = excluded.updated_at`,
+        `INSERT INTO profiles (user_id, display_name, public_visible, email_public, sort_order, updated_at)
+         VALUES (?, (SELECT name FROM users WHERE id = ?), 1, 0, 100, ?)
+         ON CONFLICT(user_id) DO NOTHING`,
       )
-      .bind(userId, userId, trim(input.roleLabel, 80), now())
+      .bind(userId, userId, now())
+      .run();
+    profileSets.push("updated_at = ?");
+    profileVals.push(now());
+    profileVals.push(userId);
+    await db
+      .prepare(`UPDATE profiles SET ${profileSets.join(", ")} WHERE user_id = ?`)
+      .bind(...profileVals)
       .run();
   }
 
