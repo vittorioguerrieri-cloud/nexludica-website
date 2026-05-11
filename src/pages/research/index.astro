@@ -5,6 +5,9 @@ import { listStudies, type Study } from "../../server/research";
 
 export const prerender = false;
 
+// Pagina dinamica: niente cache CDN per riflettere subito le modifiche su D1.
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
 const env = await getEnv();
 const db = getDb(env as Env);
 let studies: Study[] = [];

@@ -5,6 +5,8 @@ import { getStudyBySlug, listQuestionnaires } from "../../../server/research";
 
 export const prerender = false;
 
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
 const slug = Astro.params.study as string;
 const env = await getEnv();
 const db = getDb(env as Env);

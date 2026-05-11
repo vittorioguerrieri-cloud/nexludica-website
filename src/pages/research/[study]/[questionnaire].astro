@@ -5,6 +5,8 @@ import { getQuestionnaireBySlugs } from "../../../server/research";
 
 export const prerender = false;
 
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
 const studySlug = Astro.params.study as string;
 const qSlug = Astro.params.questionnaire as string;
 
