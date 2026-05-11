@@ -1,0 +1,65 @@
+---
+/**
+ * Layout dedicato al sottodominio research.nexludica.org.
+ * Header minimale (no menu del sito principale) per non distrarre dal
+ * questionario. Footer leggero con credit NexLudica.
+ */
+import "../styles/global.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** Se true, mette padding ridotto per fare spazio al questionario */
+  fluid?: boolean;
+}
+
+const {
+  title = "NexLudica Research",
+  description = "Piattaforma di ricerca scientifica di NexLudica APS.",
+  fluid = false,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/images/branding/logo-square.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="robots" content="noindex" />
+  </head>
+  <body class="min-h-screen bg-nx-off-white text-nx-dark">
+    <header class="border-b border-nx-gray-light/20 bg-white">
+      <div class="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4">
+        <a href="/" class="flex items-center gap-3 no-underline">
+          <img src="/images/branding/logo-horizontal.svg" alt="NexLudica" class="h-9 w-auto" />
+          <span class="border-l border-nx-gray-light/30 pl-3 text-xs font-bold uppercase tracking-[0.2em] text-nx-cyan">Research</span>
+        </a>
+        <a href="https://nexludica.org" class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">
+          nexludica.org →
+        </a>
+      </div>
+    </header>
+
+    <main class={fluid ? "mx-auto max-w-3xl px-4 py-8" : "mx-auto max-w-5xl px-4 py-12"}>
+      <slot />
+    </main>
+
+    <footer class="mt-16 border-t border-nx-gray-light/20 bg-white">
+      <div class="mx-auto max-w-5xl px-4 py-6 text-center text-xs text-nx-gray-dark">
+        Piattaforma di ricerca di <a href="https://nexludica.org" class="font-semibold text-nx-cyan no-underline hover:underline">NexLudica APS</a>.
+        I dati raccolti sono trattati nel rispetto della
+        <a href="/privacy-policy" class="text-nx-cyan no-underline hover:underline">privacy policy</a>.
+      </div>
+    </footer>
+  </body>
+</html>

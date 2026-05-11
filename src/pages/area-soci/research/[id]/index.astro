@@ -1,0 +1,188 @@
+---
+import AreaSociLayout from "../../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../../server/db";
+import { getUser } from "../../../../server/guards";
+import {
+  countResponses,
+  getStudyById,
+  listQuestionnaires,
+  type Questionnaire,
+} from "../../../../server/research";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const id = Astro.params.id as string;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db) return Astro.redirect("/area-soci/research");
+
+const study = await getStudyById(db, id);
+if (!study) return Astro.redirect("/area-soci/research");
+
+const qs: Questionnaire[] = await listQuestionnaires(db, study.id);
+const counts = await countResponses(db, study.id);
+const countMap = new Map(counts.map((c) => [c.questionnaireId, c.count]));
+const totalResponses = counts.reduce((a, c) => a + c.count, 0);
+
+const valOr = (s: string | null | undefined) => s ?? "";
+const publicUrl = `https://research.nexludica.org/${study.slug}`;
+---
+
+<AreaSociLayout title={`${study.title} — Research`} active="research">
+  <a href="/area-soci/research" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">← Studi</a>
+
+  <div class="mt-4 flex flex-wrap items-baseline justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">{study.title}</h2>
+      <p class="mt-1 font-mono text-xs text-nx-gray-dark">{study.slug}</p>
+      <a href={publicUrl} target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-xs font-semibold text-nx-cyan no-underline hover:underline">
+        Visita pagina pubblica →
+      </a>
+    </div>
+    <div class="rounded-lg bg-nx-cyan-light/40 px-4 py-2 text-center">
+      <p class="text-xs text-nx-gray-dark">Risposte raccolte</p>
+      <p class="text-2xl font-black text-nx-cyan">{totalResponses}</p>
+    </div>
+  </div>
+
+  <!-- Form impostazioni studio -->
+  <section class="mt-8 rounded-xl border border-nx-gray-light/20 bg-white p-6">
+    <h3 class="text-base font-bold text-nx-dark">Impostazioni</h3>
+    <form id="study-form" class="mt-4 space-y-4">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Titolo</label>
+          <input name="title" value={study.title} maxlength="200"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Slug</label>
+          <input name="slug" value={study.slug} maxlength="80" pattern="[a-z0-9-]+"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Stato</label>
+          <select name="status" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
+            <option value="draft"  selected={study.status === "draft"}>Bozza</option>
+            <option value="active" selected={study.status === "active"}>Attivo</option>
+            <option value="closed" selected={study.status === "closed"}>Chiuso</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Descrizione</label>
+          <textarea name="description" rows="4"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">{valOr(study.description)}</textarea>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="flex items-start gap-3 rounded-lg bg-nx-off-white p-3">
+            <input type="checkbox" name="publicListing" value="1" checked={study.publicListing}
+              class="mt-0.5 h-5 w-5 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan" />
+            <span class="text-sm text-nx-dark">Listato pubblicamente su research.nexludica.org</span>
+          </label>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Template codice anonimo</label>
+          <input name="anonymousCodeTemplate" value={valOr(study.anonymousCodeTemplate)} maxlength="200"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Campi identità (CSV)</label>
+          <input name="identityFields" value={study.identityFields.join(",")} maxlength="500"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm" />
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <button type="submit" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white">
+          Salva
+        </button>
+        <button type="button" id="delete-study" class="text-xs font-semibold uppercase tracking-wider text-red-700 hover:underline">
+          Elimina studio
+        </button>
+        <span id="status-msg" class="text-sm"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- Lista questionari -->
+  <section class="mt-8">
+    <div class="flex flex-wrap items-baseline justify-between gap-4">
+      <h3 class="text-base font-bold text-nx-dark">Questionari ({qs.length})</h3>
+      <a href={`/area-soci/research/${study.id}/questionnaires/new`} class="rounded-lg border border-nx-cyan px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-cyan no-underline hover:bg-nx-cyan hover:text-white">
+        + Nuovo questionario
+      </a>
+    </div>
+    {qs.length === 0 ? (
+      <p class="mt-4 rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
+        Aggiungi il primo questionario. Puoi caricare uno schema JSON SurveyJS.
+      </p>
+    ) : (
+      <ul class="mt-4 space-y-3">
+        {qs.map((q) => (
+          <li>
+            <a href={`/area-soci/research/${study.id}/questionnaires/${q.id}`}
+              class="flex items-center gap-4 rounded-xl border border-nx-gray-light/20 bg-white p-4 no-underline transition hover:border-nx-cyan hover:shadow-md">
+              <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-sm font-bold text-nx-cyan">
+                {q.position + 1}
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="font-semibold text-nx-dark">{q.title}</p>
+                <p class="font-mono text-xs text-nx-gray-dark">{q.slug} · v{q.version} · {q.status}</p>
+              </div>
+              <span class="text-xs text-nx-gray-dark">
+                <strong class="text-nx-dark">{countMap.get(q.id) ?? 0}</strong> risposte
+              </span>
+              <span class="text-xs font-semibold text-nx-cyan">→</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    )}
+  </section>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ studyId: id }}>
+  (function () {
+    const form = document.getElementById("study-form");
+    const status = document.getElementById("status-msg");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      body.publicListing = fd.has("publicListing");
+      if (typeof body.identityFields === "string") {
+        body.identityFields = body.identityFields.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+      status.textContent = "Salvataggio...";
+      status.className = "text-sm text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/research/admin/studies/" + encodeURIComponent(studyId), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = "Errore: " + (data.error || res.status);
+          status.className = "text-sm text-red-600";
+        } else {
+          status.textContent = "✓ Salvato";
+          status.className = "text-sm text-emerald-600";
+        }
+      } catch (e) {
+        status.textContent = "Errore di rete";
+        status.className = "text-sm text-red-600";
+      }
+    });
+
+    document.getElementById("delete-study").addEventListener("click", async () => {
+      if (!confirm("Eliminare lo studio? Verranno cancellati anche tutti i questionari e le risposte. Azione irreversibile.")) return;
+      const res = await fetch("/api/research/admin/studies/" + encodeURIComponent(studyId), { method: "DELETE" });
+      if (res.ok) window.location.href = "/area-soci/research";
+      else alert("Errore eliminazione");
+    });
+  })();
+</script>

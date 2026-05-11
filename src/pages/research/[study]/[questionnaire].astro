@@ -1,0 +1,139 @@
+---
+import ResearchLayout from "../../../layouts/ResearchLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getQuestionnaireBySlugs } from "../../../server/research";
+
+export const prerender = false;
+
+const studySlug = Astro.params.study as string;
+const qSlug = Astro.params.questionnaire as string;
+
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db) return new Response("Backend non disponibile", { status: 503 });
+
+const r = await getQuestionnaireBySlugs(db, studySlug, qSlug);
+if (!r) return new Response("Questionario non trovato", { status: 404 });
+const { study, questionnaire } = r;
+
+// Theme NexLudica (object da passare a SurveyJS via JSON.parse client-side)
+const defaultTheme = {
+  themeName: "nexludica",
+  colorPalette: "light",
+  isPanelless: false,
+  cssVariables: {
+    "--sjs-primary-backcolor": "#05abc4",
+    "--sjs-primary-backcolor-light": "rgba(5, 171, 196, 0.1)",
+    "--sjs-primary-backcolor-dark": "#286181",
+    "--sjs-primary-forecolor": "#ffffff",
+    "--sjs-general-backcolor": "#ffffff",
+    "--sjs-general-backcolor-dim": "#f8fafb",
+    "--sjs-general-forecolor": "#1b2528",
+    "--sjs-general-forecolor-light": "#657179",
+    "--sjs-font-family": "'Montserrat', system-ui, sans-serif",
+    "--sjs-corner-radius": "8px",
+  },
+};
+const theme = study.themeJson ? study.themeJson : JSON.stringify(defaultTheme);
+const schemaForClient = questionnaire.schemaJson;
+const questionnaireId = questionnaire.id;
+---
+
+<ResearchLayout title={`${questionnaire.title} — ${study.title}`} fluid>
+  <a href={`/research/${study.slug}`} class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">
+    ← {study.title}
+  </a>
+
+  <div class="mt-4">
+    <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Questionario</p>
+    <h1 class="mt-2 text-2xl font-bold text-nx-dark sm:text-3xl">{questionnaire.title}</h1>
+    {questionnaire.description && (
+      <p class="mt-3 text-sm text-nx-gray-dark whitespace-pre-line">{questionnaire.description}</p>
+    )}
+  </div>
+
+  <!-- SurveyJS container -->
+  <link href="https://unpkg.com/survey-core@1.12.12/defaultV2.min.css" rel="stylesheet" />
+  <div id="surveyContainer" class="mt-8"></div>
+
+  <!-- Thank you panel (mostrato dopo submit) -->
+  <div id="thankyou" class="mt-8 hidden rounded-xl border-2 border-nx-cyan/40 bg-nx-cyan-light/30 p-8 text-center">
+    <h2 class="text-2xl font-bold text-nx-dark">Grazie! 🎉</h2>
+    <p class="mt-3 text-sm text-nx-gray-dark">
+      Le tue risposte sono state registrate correttamente.
+    </p>
+    <p class="mt-6 text-xs uppercase tracking-wider text-nx-gray-dark">Codice di completamento</p>
+    <p id="completion-code" class="mt-2 font-mono text-2xl font-bold text-nx-dark"></p>
+    <p class="mt-2 text-xs text-nx-gray-dark">Conserva questo codice come ricevuta.</p>
+  </div>
+
+  <!-- Submit error panel -->
+  <div id="submit-error" class="mt-8 hidden rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"></div>
+
+  <script src="https://unpkg.com/survey-core@1.12.12/survey.core.min.js" is:inline></script>
+  <script src="https://unpkg.com/survey-js-ui@1.12.12/survey-js-ui.min.js" is:inline></script>
+  <script
+    is:inline
+    define:vars={{ schemaJson: schemaForClient, themeJson: theme, questionnaireId }}
+  >
+    (function () {
+      try {
+        const schema = JSON.parse(schemaJson);
+        const theme = JSON.parse(themeJson);
+        const Survey = window.SurveyUI || window.Survey;
+        if (!Survey || !Survey.Model) {
+          document.getElementById("submit-error").textContent = "Impossibile caricare SurveyJS";
+          document.getElementById("submit-error").classList.remove("hidden");
+          return;
+        }
+        const survey = new Survey.Model(schema);
+        if (theme && Survey.SurveyModel) {
+          survey.applyTheme(theme);
+        } else if (survey.applyTheme) {
+          try { survey.applyTheme(theme); } catch (e) {}
+        }
+
+        survey.onComplete.add(async function (sender) {
+          const payload = sender.data;
+          try {
+            const res = await fetch("/api/research/responses", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ questionnaireId, payload }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              document.getElementById("submit-error").textContent =
+                "Errore invio: " + (data.error || res.status);
+              document.getElementById("submit-error").classList.remove("hidden");
+              sender.showCompletedPage = false;
+              return;
+            }
+            // Mostra pannello grazie con completion code
+            document.getElementById("completion-code").textContent = data.completionCode;
+            document.getElementById("thankyou").classList.remove("hidden");
+            document.getElementById("thankyou").scrollIntoView({ behavior: "smooth" });
+          } catch (err) {
+            document.getElementById("submit-error").textContent = "Errore di rete";
+            document.getElementById("submit-error").classList.remove("hidden");
+          }
+        });
+
+        // Nascondi la completed page di SurveyJS (usiamo la nostra)
+        survey.showCompletedPage = false;
+
+        if (Survey.SurveyUI && Survey.SurveyUI.renderSurvey) {
+          // API nuova
+          Survey.SurveyUI.renderSurvey(survey, document.getElementById("surveyContainer"));
+        } else if (survey.render) {
+          survey.render(document.getElementById("surveyContainer"));
+        }
+      } catch (e) {
+        console.error(e);
+        const err = document.getElementById("submit-error");
+        err.textContent = "Errore caricamento questionario: " + (e && e.message ? e.message : e);
+        err.classList.remove("hidden");
+      }
+    })();
+  </script>
+</ResearchLayout>

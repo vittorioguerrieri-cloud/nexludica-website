@@ -4,7 +4,7 @@ import { getUser } from "../server/guards";
 
 export interface Props {
   title?: string;
-  active?: "dashboard" | "profilo" | "articoli" | "verbali" | "admin" | "libro-soci" | "quote" | "volontari";
+  active?: "dashboard" | "profilo" | "articoli" | "verbali" | "admin" | "libro-soci" | "quote" | "volontari" | "research";
 }
 const { title = "Area Soci — NexLudica APS", active = "dashboard" } = Astro.props;
 
@@ -24,6 +24,7 @@ const navItems: Array<{ href: string; key: string; label: string; icon: string; 
   { href: "/area-soci/admin/libro-soci", key: "libro-soci", label: "Libro soci", icon: "❡", adminOnly: true, section: "admin" },
   { href: "/area-soci/admin/quote", key: "quote", label: "Registro quote", icon: "€", adminOnly: true, section: "admin" },
   { href: "/area-soci/admin/volontari", key: "volontari", label: "Registro volontari", icon: "♥", adminOnly: true, section: "admin" },
+  { href: "/area-soci/research", key: "research", label: "Research Platform", icon: "▲", adminOnly: true, section: "admin" },
 ].filter((it) => !it.adminOnly || isAdmin);
 ---
 

@@ -1,0 +1,134 @@
+---
+import AreaSociLayout from "../../../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../../../server/db";
+import { getUser } from "../../../../../server/guards";
+import { getStudyById } from "../../../../../server/research";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const studyId = Astro.params.id as string;
+const env = await getEnv();
+const db = getDb(env as Env);
+const study = db ? await getStudyById(db, studyId) : null;
+if (!study) return Astro.redirect("/area-soci/research");
+
+const minimalSchema = JSON.stringify({
+  title: "Nuovo questionario",
+  pages: [
+    {
+      name: "page1",
+      elements: [
+        {
+          type: "text",
+          name: "esempio",
+          title: "Esempio domanda",
+          isRequired: true,
+        },
+      ],
+    },
+  ],
+}, null, 2);
+---
+
+<AreaSociLayout title={`Nuovo questionario — ${study.title}`} active="research">
+  <a href={`/area-soci/research/${study.id}`} class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">← {study.title}</a>
+
+  <div class="mt-4 rounded-xl border border-nx-gray-light/20 bg-white p-8">
+    <h2 class="text-2xl font-bold text-nx-dark">Nuovo questionario</h2>
+    <p class="mt-2 text-sm text-nx-gray-dark">
+      Incolla lo schema JSON di SurveyJS. Puoi crearlo visualmente su
+      <a href="https://surveyjs.io/create-free-survey" target="_blank" rel="noopener noreferrer" class="text-nx-cyan no-underline hover:underline">surveyjs.io/create-free-survey</a>
+      e copiare il JSON.
+    </p>
+
+    <form id="q-form" class="mt-8 space-y-5">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Titolo *</label>
+          <input name="title" required maxlength="200"
+            placeholder="es. T1 — Pre game"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Slug *</label>
+          <input name="slug" required maxlength="80" pattern="[a-z0-9-]+"
+            placeholder="t1-pre-game"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 font-mono text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Descrizione</label>
+          <textarea name="description" rows="3"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ordine</label>
+          <input name="position" type="number" min="0" value="0"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Stato</label>
+          <select name="status" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm">
+            <option value="draft" selected>Bozza</option>
+            <option value="active">Attivo</option>
+            <option value="closed">Chiuso</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Schema SurveyJS (JSON) *</label>
+          <textarea name="schemaJson" rows="20" required
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 font-mono text-xs leading-relaxed">{minimalSchema}</textarea>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Deve essere JSON valido. Il sistema applica automaticamente il tema NexLudica
+            (cyan/dark, Montserrat) se non specifichi un tema custom.
+          </p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4 pt-2">
+        <button type="submit" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white">
+          Crea questionario
+        </button>
+        <span id="status" class="text-sm"></span>
+      </div>
+    </form>
+  </div>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ studyId }}>
+  (function () {
+    const form = document.getElementById("q-form");
+    const status = document.getElementById("status");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      body.studyId = studyId;
+      body.position = Number(body.position || 0);
+      // Validate JSON
+      try {
+        JSON.parse(body.schemaJson);
+      } catch (err) {
+        status.textContent = "Schema JSON non valido: " + err.message;
+        status.className = "text-sm text-red-600";
+        return;
+      }
+      status.textContent = "Creazione...";
+      status.className = "text-sm text-nx-gray-dark";
+      const res = await fetch("/api/research/admin/questionnaires", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        status.textContent = "Errore: " + (data.error || res.status);
+        status.className = "text-sm text-red-600";
+      } else {
+        window.location.href = "/area-soci/research/" + studyId + "/questionnaires/" + data.questionnaire.id;
+      }
+    });
+  })();
+</script>

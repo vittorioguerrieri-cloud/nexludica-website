@@ -1,0 +1,128 @@
+---
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getUser } from "../../../server/guards";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+---
+
+<AreaSociLayout title="Nuovo studio — Research" active="research">
+  <a href="/area-soci/research" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">← Studi</a>
+
+  <div class="mt-4 rounded-xl border border-nx-gray-light/20 bg-white p-8">
+    <h2 class="text-2xl font-bold text-nx-dark">Nuovo studio</h2>
+    <p class="mt-2 text-sm text-nx-gray-dark">
+      Crea uno studio per raggruppare uno o piu' questionari. Lo slug viene usato nell'URL pubblico.
+    </p>
+
+    <form id="study-form" class="mt-8 space-y-5">
+      <div class="grid gap-5 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Titolo *</label>
+          <input name="title" required maxlength="200"
+            placeholder="es. Validazione Pesto HR"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Slug URL *</label>
+          <input name="slug" required maxlength="80" pattern="[a-z0-9-]+"
+            placeholder="pesto-hr-2026"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 font-mono text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <p class="mt-1 text-xs text-nx-gray-dark">Lowercase, lettere/numeri/trattini. Es. URL: research.nexludica.org/<strong>slug</strong>.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Stato</label>
+          <select name="status" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm">
+            <option value="draft" selected>Bozza (non visibile)</option>
+            <option value="active">Attivo</option>
+            <option value="closed">Chiuso</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Descrizione</label>
+          <textarea name="description" rows="4"
+            placeholder="Breve introduzione allo studio, finalita', target di partecipanti..."
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="flex items-start gap-3 rounded-lg bg-nx-off-white p-4">
+            <input type="checkbox" name="publicListing" value="1" checked
+              class="mt-0.5 h-5 w-5 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan" />
+            <div>
+              <span class="text-sm font-semibold text-nx-dark">Listato pubblicamente su research.nexludica.org</span>
+              <p class="mt-1 text-xs text-nx-gray-dark">
+                Disattiva per studi accessibili solo via link diretto inviato ai partecipanti.
+              </p>
+            </div>
+          </label>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Template codice anonimo</label>
+          <input name="anonymousCodeTemplate" maxlength="200"
+            placeholder="es. M{birthDay}V{phoneFirst2}"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 font-mono text-sm" />
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Opzionale. Usa <code>{`{nomeCampo}`}</code> per inserire valori dal questionario.
+            Serve a matchare le risposte dello stesso partecipante su piu' timepoint.
+          </p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Campi identita' (CSV)</label>
+          <input name="identityFields" maxlength="500"
+            placeholder="es. birthDay,phoneFirst2,motherInitial"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 font-mono text-sm" />
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Nomi dei campi del questionario che concorrono al codice anonimo.
+          </p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4 pt-2">
+        <button type="submit" class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:bg-nx-blue">
+          Crea studio
+        </button>
+        <a href="/area-soci/research" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">Annulla</a>
+        <span id="status" class="text-sm"></span>
+      </div>
+    </form>
+  </div>
+</AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("study-form");
+    const status = document.getElementById("status");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      body.publicListing = fd.has("publicListing") ? true : false;
+      if (typeof body.identityFields === "string" && body.identityFields) {
+        body.identityFields = body.identityFields.split(",").map((s) => s.trim()).filter(Boolean);
+      } else {
+        body.identityFields = [];
+      }
+      status.textContent = "Creazione...";
+      status.className = "text-sm text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/research/admin/studies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          status.textContent = "Errore: " + (data.error || res.status);
+          status.className = "text-sm text-red-600";
+        } else {
+          window.location.href = "/area-soci/research/" + data.study.id;
+        }
+      } catch (e) {
+        status.textContent = "Errore di rete";
+        status.className = "text-sm text-red-600";
+      }
+    });
+  })();
+</script>

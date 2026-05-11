@@ -1,0 +1,183 @@
+---
+import AreaSociLayout from "../../../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../../../server/db";
+import { getUser } from "../../../../../server/guards";
+import {
+  getQuestionnaireById,
+  getStudyById,
+  listResponses,
+  type Response as ResearchResponse,
+} from "../../../../../server/research";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const studyId = Astro.params.id as string;
+const qid = Astro.params.qid as string;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db) return Astro.redirect("/area-soci/research");
+const study = await getStudyById(db, studyId);
+const q = await getQuestionnaireById(db, qid);
+if (!study || !q) return Astro.redirect("/area-soci/research");
+
+const responses: ResearchResponse[] = await listResponses(db, study.id, { questionnaireId: q.id, limit: 100 });
+const publicUrl = `https://research.nexludica.org/${study.slug}/${q.slug}`;
+---
+
+<AreaSociLayout title={`${q.title} — Research`} active="research">
+  <a href={`/area-soci/research/${study.id}`} class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">← {study.title}</a>
+
+  <div class="mt-4 flex flex-wrap items-baseline justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">{q.title}</h2>
+      <p class="mt-1 font-mono text-xs text-nx-gray-dark">{q.slug} · versione {q.version} · {q.status}</p>
+      <a href={publicUrl} target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-xs font-semibold text-nx-cyan no-underline hover:underline">
+        Anteprima pubblica →
+      </a>
+    </div>
+    <div class="rounded-lg bg-nx-cyan-light/40 px-4 py-2 text-center">
+      <p class="text-xs text-nx-gray-dark">Risposte</p>
+      <p class="text-2xl font-black text-nx-cyan">{responses.length}</p>
+    </div>
+  </div>
+
+  <!-- Form impostazioni questionario -->
+  <section class="mt-8 rounded-xl border border-nx-gray-light/20 bg-white p-6">
+    <h3 class="text-base font-bold text-nx-dark">Impostazioni</h3>
+    <form id="q-form" class="mt-4 space-y-4">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Titolo</label>
+          <input name="title" value={q.title} maxlength="200"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Slug</label>
+          <input name="slug" value={q.slug} maxlength="80" pattern="[a-z0-9-]+"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Descrizione</label>
+          <textarea name="description" rows="3"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">{q.description ?? ""}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ordine</label>
+          <input name="position" type="number" min="0" value={q.position}
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Stato</label>
+          <select name="status" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
+            <option value="draft" selected={q.status === "draft"}>Bozza</option>
+            <option value="active" selected={q.status === "active"}>Attivo</option>
+            <option value="closed" selected={q.status === "closed"}>Chiuso</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Schema SurveyJS (JSON)</label>
+          <textarea name="schemaJson" rows="20"
+            class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-xs leading-relaxed">{q.schemaJson}</textarea>
+          <p class="mt-1 text-xs text-nx-gray-dark">Ogni modifica incrementa la versione (ora v{q.version}). Le risposte gia' raccolte vengono associate alla loro versione originale.</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <button type="submit" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white">
+          Salva
+        </button>
+        <button type="button" id="delete-q" class="text-xs font-semibold uppercase tracking-wider text-red-700 hover:underline">
+          Elimina questionario
+        </button>
+        <span id="status-msg" class="text-sm"></span>
+      </div>
+    </form>
+  </section>
+
+  <!-- Risposte recenti -->
+  <section class="mt-8">
+    <div class="flex flex-wrap items-baseline justify-between gap-4">
+      <h3 class="text-base font-bold text-nx-dark">Risposte ({responses.length})</h3>
+      {responses.length > 0 && (
+        <a href={`/api/research/admin/responses.csv?studyId=${study.id}&questionnaireId=${q.id}`}
+          class="rounded-lg border border-nx-cyan px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-cyan no-underline hover:bg-nx-cyan hover:text-white">
+          ⬇ Esporta CSV
+        </a>
+      )}
+    </div>
+    {responses.length === 0 ? (
+      <p class="mt-4 rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-6 text-center text-xs text-nx-gray-dark">
+        Nessuna risposta ricevuta.
+      </p>
+    ) : (
+      <div class="mt-4 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white">
+        <table class="w-full text-xs">
+          <thead class="bg-nx-off-white uppercase tracking-wider text-nx-gray-dark">
+            <tr>
+              <th class="px-3 py-2 text-left">Data</th>
+              <th class="px-3 py-2 text-left">Codice anonimo</th>
+              <th class="px-3 py-2 text-left">Completion</th>
+              <th class="px-3 py-2 text-left">Versione schema</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-nx-gray-light/20">
+            {responses.map((r) => (
+              <tr>
+                <td class="px-3 py-2 text-nx-gray-dark">
+                  {new Date(r.createdAt).toLocaleString("it-IT")}
+                </td>
+                <td class="px-3 py-2 font-mono text-nx-dark">{r.anonymousCode ?? "—"}</td>
+                <td class="px-3 py-2 font-mono text-nx-dark">{r.completionCode}</td>
+                <td class="px-3 py-2 text-nx-gray-dark">v{r.schemaVersion}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ studyId, qid }}>
+  (function () {
+    const form = document.getElementById("q-form");
+    const status = document.getElementById("status-msg");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      body.position = Number(body.position || 0);
+      try { JSON.parse(body.schemaJson); }
+      catch (err) {
+        status.textContent = "Schema JSON non valido: " + err.message;
+        status.className = "text-sm text-red-600";
+        return;
+      }
+      status.textContent = "Salvataggio...";
+      status.className = "text-sm text-nx-gray-dark";
+      const res = await fetch("/api/research/admin/questionnaires/" + encodeURIComponent(qid), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        status.textContent = "Errore: " + (data.error || res.status);
+        status.className = "text-sm text-red-600";
+      } else {
+        status.textContent = "✓ Salvato (v" + data.questionnaire.version + ")";
+        status.className = "text-sm text-emerald-600";
+      }
+    });
+
+    document.getElementById("delete-q").addEventListener("click", async () => {
+      if (!confirm("Eliminare il questionario? Tutte le risposte verranno cancellate. Irreversibile.")) return;
+      const res = await fetch("/api/research/admin/questionnaires/" + encodeURIComponent(qid), { method: "DELETE" });
+      if (res.ok) window.location.href = "/area-soci/research/" + studyId;
+      else alert("Errore");
+    });
+  })();
+</script>
