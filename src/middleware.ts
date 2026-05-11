@@ -32,7 +32,17 @@ export const onRequest = defineMiddleware(async (ctx, next) => {
   }
 
   if (!url.pathname.startsWith("/research")) {
-    const newPath = url.pathname === "/" ? "/research" : "/research" + url.pathname;
+    // Rewrite con trailing slash quando serve, per matchare le rotte Astro
+    // (che redirectano da /research a /research/, e da /research/x a /research/x/).
+    // Astro vuole il path "interno" giusto, altrimenti restituisce un 308
+    // redirect che, su sottodominio, finisce per servire la home principale.
+    let newPath: string;
+    if (url.pathname === "/" || url.pathname === "") {
+      newPath = "/research/";
+    } else {
+      newPath = "/research" + url.pathname;
+      if (!newPath.endsWith("/")) newPath += "/";
+    }
     const newUrl = new URL(newPath + url.search, url);
     return ctx.rewrite(newUrl);
   }
