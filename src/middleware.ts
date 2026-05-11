@@ -15,11 +15,25 @@ const RESEARCH_HOST = "research.nexludica.org";
 
 export const onRequest = defineMiddleware(async (ctx, next) => {
   const url = new URL(ctx.request.url);
-  if (url.hostname === RESEARCH_HOST && !url.pathname.startsWith("/research")) {
-    // Rewrite del path interno
+  if (url.hostname !== RESEARCH_HOST) return next();
+
+  // Path che NON vanno riscritti: endpoint API condivisi e asset statici.
+  // Cosi' research.nexludica.org/api/research/responses raggiunge la stessa
+  // rotta che e' anche su nexludica.org/api/research/responses.
+  const passthrough = [
+    "/api/",
+    "/r2/",
+    "/images/",
+    "/_astro/",
+    "/favicon",
+  ];
+  if (passthrough.some((p) => url.pathname.startsWith(p))) {
+    return next();
+  }
+
+  if (!url.pathname.startsWith("/research")) {
     const newPath = url.pathname === "/" ? "/research" : "/research" + url.pathname;
     const newUrl = new URL(newPath + url.search, url);
-    // Astro 6 supporta ctx.rewrite con URL o stringa
     return ctx.rewrite(newUrl);
   }
   return next();
