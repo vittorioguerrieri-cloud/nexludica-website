@@ -1,0 +1,171 @@
+---
+import ResearchLayout from "../../../layouts/ResearchLayout.astro";
+import { getUser } from "../../../server/guards";
+import { getDb, getEnv } from "../../../server/db";
+import { listStudies, listQuestionnaires, listResponses, countResponses } from "../../../server/research";
+
+export const prerender = false;
+
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user || user.role !== "admin") {
+  return Astro.redirect("/no-access");
+}
+
+const env = await getEnv();
+const db = getDb(env as Env)!;
+
+const studies = await listStudies(db);
+const studySlug = Astro.url.searchParams.get("study") || studies[0]?.slug || "";
+const study = studies.find((s) => s.slug === studySlug) || null;
+
+let questionnaires: Awaited<ReturnType<typeof listQuestionnaires>> = [];
+let responses: Awaited<ReturnType<typeof listResponses>> = [];
+let counts: Awaited<ReturnType<typeof countResponses>> = [];
+
+if (study) {
+  questionnaires = await listQuestionnaires(db, study.id);
+  counts = await countResponses(db, study.id);
+  const qFilter = Astro.url.searchParams.get("q") || "";
+  responses = await listResponses(db, study.id, {
+    questionnaireId: qFilter || undefined,
+    limit: 5000,
+  });
+}
+
+type DecodedResponse = {
+  id: string;
+  completionCode: string;
+  createdAt: number;
+  schemaVersion: number;
+  prolificPid: string;
+  payload: Record<string, unknown>;
+};
+
+const decoded: DecodedResponse[] = responses.map((r) => {
+  let p: Record<string, unknown> = {};
+  try { p = JSON.parse(r.payloadJson) ?? {}; } catch {}
+  return {
+    id: r.id,
+    completionCode: r.completionCode,
+    createdAt: r.createdAt,
+    schemaVersion: r.schemaVersion,
+    prolificPid: (p.prolific_pid as string) || "",
+    payload: p,
+  };
+});
+
+const metaKeys = [
+  "_randomization_seed", "_randomization_meta",
+  "prolific_pid", "prolific_study_id", "prolific_session_id",
+  "consent_age", "consent_data",
+];
+const allPayloadKeys = new Set<string>();
+for (const d of decoded) {
+  for (const k of Object.keys(d.payload)) {
+    if (!metaKeys.includes(k)) allPayloadKeys.add(k);
+  }
+}
+const dataKeys = Array.from(allPayloadKeys).sort();
+
+const totalCount = study ? counts.reduce((s, c) => s + c.count, 0) : 0;
+---
+
+<ResearchLayout title="Research Admin — Responses">
+  <section>
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Admin</p>
+        <h1 class="mt-2 text-3xl font-black tracking-tight text-nx-dark" style="font-family: var(--font-display);">
+          Responses
+        </h1>
+      </div>
+      <a href="/" class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">
+        ← Home Research
+      </a>
+    </div>
+
+    {/* Study selector */}
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+      <label class="text-sm font-semibold text-nx-dark">Studio:</label>
+      {studies.map((s) => (
+        <a
+          href={`?study=${s.slug}`}
+          class:list={[
+            "rounded-full px-4 py-1.5 text-xs font-bold uppercase tracking-wider no-underline transition",
+            s.slug === studySlug
+              ? "bg-nx-cyan text-white shadow-sm"
+              : "bg-white text-nx-gray-dark border border-nx-gray-light/30 hover:border-nx-cyan hover:text-nx-cyan",
+          ]}
+        >
+          {s.title}
+          {(() => { const c = counts.find(cc => true); return ""; })()}
+        </a>
+      ))}
+    </div>
+  </section>
+
+  {study ? (
+    <section class="mt-8">
+      <div class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <div class="flex items-center gap-6 text-sm">
+          <span class="font-bold text-nx-dark">{totalCount} responses</span>
+          <span class="text-nx-gray-dark">Schema v{questionnaires[0]?.version ?? "?"}</span>
+          <span class="text-nx-gray-dark">{dataKeys.length} data fields</span>
+        </div>
+        <a
+          href={`/api/research/admin/responses.csv?studyId=${study.id}`}
+          class="rounded-lg bg-nx-dark px-4 py-2 text-xs font-bold uppercase tracking-wider text-white no-underline shadow-sm transition hover:bg-nx-blue"
+        >
+          Download CSV
+        </a>
+      </div>
+
+      {decoded.length === 0 ? (
+        <p class="mt-8 rounded-lg border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
+          Nessuna risposta per questo studio.
+        </p>
+      ) : (
+        <div class="mt-6 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white shadow-sm">
+          <table class="w-full text-left text-xs" id="responses-table">
+            <thead class="border-b border-nx-gray-light/20 bg-nx-off-white">
+              <tr>
+                <th class="sticky left-0 z-10 bg-nx-off-white px-3 py-3 font-bold text-nx-dark">#</th>
+                <th class="px-3 py-3 font-bold text-nx-dark whitespace-nowrap">Timestamp</th>
+                <th class="px-3 py-3 font-bold text-nx-dark whitespace-nowrap">Prolific PID</th>
+                <th class="px-3 py-3 font-bold text-nx-dark whitespace-nowrap">Completion Code</th>
+                {dataKeys.map((k) => (
+                  <th class="px-3 py-3 font-bold text-nx-dark whitespace-nowrap">{k}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-nx-gray-light/10">
+              {decoded.map((d, i) => (
+                <tr class="hover:bg-nx-cyan/5 transition-colors">
+                  <td class="sticky left-0 z-10 bg-white px-3 py-2.5 font-mono text-nx-gray-dark">{i + 1}</td>
+                  <td class="px-3 py-2.5 whitespace-nowrap text-nx-gray-dark">
+                    {new Date(d.createdAt).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                  <td class="px-3 py-2.5 font-mono text-nx-dark">{d.prolificPid || "-"}</td>
+                  <td class="px-3 py-2.5 font-mono text-nx-cyan">{d.completionCode}</td>
+                  {dataKeys.map((k) => {
+                    const v = d.payload[k];
+                    const display = v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+                    return (
+                      <td class="px-3 py-2.5 text-nx-gray-dark max-w-[200px] truncate" title={display}>
+                        {display}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  ) : (
+    <p class="mt-8 text-sm text-nx-gray-dark">Seleziona uno studio.</p>
+  )}
+</ResearchLayout>

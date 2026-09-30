@@ -25,6 +25,8 @@ interface Env {
   FROM_NAME: string;
   /** Set via `wrangler secret put RESEND_API_KEY`. Optional in dev. */
   RESEND_API_KEY?: string;
+  /** Signing secret del webhook Resend (whsec_...). Set via `wrangler secret put RESEND_WEBHOOK_SECRET`. */
+  RESEND_WEBHOOK_SECRET?: string;
   /** Set via `wrangler secret put SESSION_SECRET`. Required in prod. */
   SESSION_SECRET?: string;
   /** JSON service account Google. Set via `wrangler secret put GOOGLE_SERVICE_ACCOUNT_JSON`. */

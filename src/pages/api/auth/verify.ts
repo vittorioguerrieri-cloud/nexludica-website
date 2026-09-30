@@ -24,7 +24,7 @@ export const GET: APIRoute = async (ctx) => {
   );
   const headers = new Headers();
   const isHttps = ctx.url.protocol === "https:";
-  setSessionCookie(headers, sid, isHttps);
+  setSessionCookie(headers, sid, isHttps, ctx.url.hostname);
   headers.set("Location", "/area-soci");
   return new Response(null, { status: 302, headers });
 };

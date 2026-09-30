@@ -1,0 +1,439 @@
+---
+/**
+ * Pagina PUBBLICA di firma elettronica (no auth necessaria, accesso via token).
+ *
+ * Flusso:
+ *  - Token nel path → lookup signature
+ *  - Se valido + non scaduto → mostra PDF preview + form firma
+ *  - User digita nome + flag consenso → POST /api/firma/:token
+ *  - Mostra ricevuta con timestamp
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getDb, getEnv } from "../../server/db";
+import { getSignatureByToken, markViewed, CONSENT_TEXT } from "../../server/verbali-signatures";
+import { getVerbale, typeLabel } from "../../server/verbali";
+import { listAttachments, formatSize } from "../../server/verbali-attachments";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const { token } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+
+let error: string | null = null;
+let signature: Awaited<ReturnType<typeof getSignatureByToken>> = null;
+let verbale: Awaited<ReturnType<typeof getVerbale>> = null;
+
+if (!db || !token) {
+  error = "Link non valido.";
+} else {
+  signature = await getSignatureByToken(db, String(token));
+  if (!signature) {
+    error = "Link non valido o scaduto.";
+  } else if (signature.status === "expired" || signature.expiresAt < Date.now()) {
+    error = "Questo link è scaduto. Contatta l'associazione per ricevere un nuovo invio.";
+  } else if (signature.status === "revoked") {
+    error = "Richiesta di firma annullata.";
+  } else if (signature.status === "declined") {
+    error = "Hai già rifiutato di firmare questo documento.";
+  } else {
+    verbale = await getVerbale(db, signature.verbaleId);
+    if (!verbale) {
+      error = "Documento non trovato.";
+    } else {
+      // Mark viewed (idempotente)
+      await markViewed(db, String(token));
+    }
+  }
+}
+
+const attachments = (db && signature && verbale)
+  ? await listAttachments(db, signature.verbaleId)
+  : [];
+
+const fmtDate = (s: string) => {
+  try {
+    const [y, m, d] = s.split("-").map(Number);
+    const months = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
+    return `${d} ${months[m-1]} ${y}`;
+  } catch { return s; }
+};
+const fmtDt = (ts: number) => new Date(ts).toLocaleString("it-IT", { dateStyle: "long", timeStyle: "short" });
+const alreadySigned = signature?.status === "signed";
+---
+
+<BaseLayout
+  title={signature ? `Firma: ${verbale?.title ?? "verbale"}` : "Firma elettronica"}
+  description="Pagina di firma elettronica NexLudica APS"
+  noindex={true}
+>
+  <section class="bg-nx-off-white px-4 pb-16 pt-28">
+    <div class="mx-auto max-w-3xl">
+      {error && (
+        <div class="rounded-xl border border-red-200 bg-red-50 p-8 text-center">
+          <h1 class="text-2xl font-bold text-red-800">Impossibile firmare</h1>
+          <p class="mt-3 text-red-700">{error}</p>
+          <p class="mt-6 text-xs text-nx-gray-dark">
+            Se pensi sia un errore, scrivi a <a href="mailto:info@nexludica.org" class="text-nx-cyan">info@nexludica.org</a>.
+          </p>
+        </div>
+      )}
+
+      {signature && verbale && (
+        <>
+          <header class="text-center">
+            <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Firma elettronica</p>
+            <h1 class="mt-3 text-3xl font-black text-nx-dark">{verbale.title}</h1>
+            <p class="mt-2 text-sm text-nx-gray-dark">
+              {typeLabel(verbale.type)} · {fmtDate(verbale.meetingDate)}
+              {verbale.meetingTime && ` · ore ${verbale.meetingTime}`}
+            </p>
+          </header>
+
+          {alreadySigned ? (
+            <div class="mt-8 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-8 text-center">
+              <p class="text-4xl">✓</p>
+              <h2 class="mt-3 text-xl font-bold text-emerald-900">Hai già firmato questo verbale</h2>
+              <p class="mt-2 text-sm text-emerald-800">
+                Firma registrata il <strong>{fmtDt(signature.signedAt!)}</strong>
+              </p>
+              <p class="mt-1 font-mono text-xs text-emerald-700">
+                Firma: "{signature.typedSignature}"
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Preview PDF */}
+              <section class="mt-8">
+                <p class="mb-2 text-xs font-bold uppercase tracking-wider text-nx-dark">Documento da firmare</p>
+                <iframe
+                  src={`/api/firma/${signature.token}/pdf`}
+                  class="h-[60vh] w-full rounded-lg border border-nx-gray-light/30 bg-white"
+                  title="Anteprima verbale"
+                />
+                <p class="mt-2 text-[11px] text-nx-gray-dark">
+                  Hash documento (SHA-256, integrità): <code class="text-nx-cyan">{signature.documentHash?.slice(0, 16)}…{signature.documentHash?.slice(-8)}</code>
+                </p>
+              </section>
+
+              {/* Allegati (scaricabili dal firmatario via token) */}
+              {attachments.length > 0 && (
+                <section class="mt-6 rounded-xl border border-nx-gray-light/20 bg-white p-5">
+                  <p class="text-xs font-bold uppercase tracking-wider text-nx-dark">
+                    Allegati ({attachments.length})
+                  </p>
+                  <p class="mt-1 text-[11px] text-nx-gray-dark">
+                    Documenti annessi al verbale. Ti raccomandiamo di consultarli prima di firmare.
+                  </p>
+                  <ul class="mt-3 divide-y divide-nx-gray-light/20 text-sm">
+                    {attachments.map((a) => (
+                      <li class="flex items-center justify-between gap-3 py-2">
+                        <div class="min-w-0 flex-1">
+                          <p class="truncate font-semibold text-nx-dark">{a.filename}</p>
+                          <p class="mt-0.5 text-[10px] text-nx-gray-dark">
+                            {formatSize(a.sizeBytes)}{a.mimeType ? ` · ${a.mimeType}` : ""}
+                          </p>
+                          {a.notes && <p class="mt-0.5 text-[11px] italic text-nx-gray-dark">{a.notes}</p>}
+                        </div>
+                        <a
+                          href={`/api/firma/${signature.token}/attachments/${a.id}`}
+                          download={a.filename}
+                          class="shrink-0 rounded-md border border-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-cyan no-underline hover:bg-nx-cyan-light"
+                        >
+                          Scarica
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Form firma */}
+              <section class="mt-8 rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+                <h2 class="text-lg font-bold text-nx-dark">Firma</h2>
+                <p class="mt-1 text-sm text-nx-gray-dark">
+                  Stai firmando come <strong>{signature.signerName}</strong> ({signature.signerEmail}).
+                </p>
+
+                <form id="sign-form" class="mt-6 space-y-4">
+                  {/* Modalità di firma */}
+                  <div>
+                    <p class="text-xs font-bold uppercase tracking-wider text-nx-dark">Modalità firma</p>
+                    <div class="mt-2 inline-flex rounded-md border border-nx-gray-light/40 p-0.5 text-xs">
+                      <button type="button" id="sig-mode-typed"
+                        class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none bg-nx-cyan text-white">
+                        Digita
+                      </button>
+                      <button type="button" id="sig-mode-drawn"
+                        class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none text-nx-dark hover:bg-nx-off-white">
+                        Disegna
+                      </button>
+                      <button type="button" id="sig-mode-uploaded"
+                        class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none text-nx-dark hover:bg-nx-off-white">
+                        Carica immagine
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Nome (sempre richiesto come fallback testuale + record) */}
+                  <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">
+                      Il tuo nome completo *
+                    </label>
+                    <input
+                      id="typed-signature"
+                      type="text"
+                      maxlength="80"
+                      required
+                      placeholder={signature.signerName}
+                      autocomplete="name"
+                      class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-2xl italic text-nx-dark focus:border-nx-cyan focus:outline-none"
+                    />
+                    <p class="mt-1 text-[11px] text-nx-gray-dark">
+                      Sempre richiesto. Se modalità "Digita", appare anche come firma sul documento.
+                    </p>
+                  </div>
+
+                  {/* Canvas firma (modalità Disegna) */}
+                  <div id="sig-drawn-wrap" class="hidden">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Disegna la tua firma</label>
+                    <div class="mt-1 rounded-md border border-nx-gray-light/40 bg-white">
+                      <canvas id="sig-canvas" width="600" height="200" class="block w-full touch-none" style="height:200px;cursor:crosshair;"></canvas>
+                    </div>
+                    <div class="mt-2 flex items-center gap-2">
+                      <button type="button" id="sig-canvas-clear" class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">Cancella</button>
+                      <p class="text-[11px] text-nx-gray-dark">Usa mouse o dito (su touch). La firma viene salvata come immagine PNG.</p>
+                    </div>
+                  </div>
+
+                  {/* Upload immagine (modalità Carica) */}
+                  <div id="sig-uploaded-wrap" class="hidden">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Carica immagine della tua firma</label>
+                    <input id="sig-file" type="file" accept="image/png,image/jpeg" class="mt-1 w-full text-sm" />
+                    <p class="mt-1 text-[11px] text-nx-gray-dark">PNG o JPEG, max 300KB. Sfondo bianco/trasparente consigliato.</p>
+                    <div id="sig-uploaded-preview" class="mt-2 hidden">
+                      <p class="text-[11px] font-semibold text-nx-gray-dark">Anteprima:</p>
+                      <img id="sig-uploaded-img" src="" alt="firma" class="mt-1 max-h-32 rounded border border-nx-gray-light/30 bg-white" />
+                    </div>
+                  </div>
+
+                  {/* Consenso esplicito */}
+                  <div class="rounded-lg border border-nx-gray-light/30 bg-nx-off-white p-4">
+                    <label class="flex items-start gap-3 cursor-pointer">
+                      <input id="consent-cb" type="checkbox" required class="mt-1 h-4 w-4 rounded text-nx-cyan focus:ring-nx-cyan" />
+                      <span class="text-xs leading-relaxed text-nx-dark">
+                        {CONSENT_TEXT}
+                      </span>
+                    </label>
+                  </div>
+
+                  <p id="sign-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+                  <p id="sign-ok" class="hidden rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700"></p>
+
+                  <div class="flex items-center justify-between gap-3 border-t border-nx-gray-light/20 pt-4">
+                    <button type="button" id="decline-btn"
+                      class="text-xs font-semibold text-red-500 hover:text-red-700">
+                      Non firmo / decline
+                    </button>
+                    <button type="submit" id="sign-btn"
+                      class="rounded-md bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50">
+                      Firma documento
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <p class="mt-6 text-center text-[11px] text-nx-gray-dark">
+                Firma elettronica semplice ex art. 25 Reg. eIDAS 910/2014 · NexLudica APS · nexludica.org
+              </p>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  </section>
+
+  <script is:inline define:vars={{ tokenStr: token, expectedName: signature?.signerName ?? "" }}>
+    const form = document.getElementById("sign-form");
+    if (form) {
+      const btn = document.getElementById("sign-btn");
+      const errEl = document.getElementById("sign-err");
+      const okEl = document.getElementById("sign-ok");
+
+      // ===== MODE TOGGLE (Digita / Disegna / Carica) =====
+      let sigMode = "typed";
+      const modeBtns = {
+        typed: document.getElementById("sig-mode-typed"),
+        drawn: document.getElementById("sig-mode-drawn"),
+        uploaded: document.getElementById("sig-mode-uploaded"),
+      };
+      const drawnWrap = document.getElementById("sig-drawn-wrap");
+      const uploadedWrap = document.getElementById("sig-uploaded-wrap");
+      function setBtnActive(b, active) {
+        b.classList.toggle("bg-nx-cyan", active);
+        b.classList.toggle("text-white", active);
+        b.classList.toggle("text-nx-dark", !active);
+        b.classList.toggle("hover:bg-nx-off-white", !active);
+      }
+      function setMode(m) {
+        sigMode = m;
+        Object.entries(modeBtns).forEach(([k, b]) => setBtnActive(b, k === m));
+        drawnWrap.classList.toggle("hidden", m !== "drawn");
+        uploadedWrap.classList.toggle("hidden", m !== "uploaded");
+      }
+      modeBtns.typed.addEventListener("click", () => setMode("typed"));
+      modeBtns.drawn.addEventListener("click", () => setMode("drawn"));
+      modeBtns.uploaded.addEventListener("click", () => setMode("uploaded"));
+
+      // ===== SIGNATURE PAD (canvas drawing) =====
+      const canvas = document.getElementById("sig-canvas");
+      const ctx = canvas.getContext("2d");
+      // Adatta dimensione canvas al device pixel ratio per nitidezza retina
+      function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = 200 * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "#1b2528";
+      }
+      resizeCanvas();
+      window.addEventListener("resize", () => {
+        // Re-init perdendo il disegno (semplificazione)
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = 200 * dpr;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "#1b2528";
+      });
+      let drawing = false;
+      let hasDrawn = false;
+      function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const t = e.touches ? e.touches[0] : e;
+        return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+      }
+      function startDraw(e) {
+        e.preventDefault();
+        drawing = true; hasDrawn = true;
+        const p = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+      }
+      function moveDraw(e) {
+        if (!drawing) return;
+        e.preventDefault();
+        const p = getPos(e);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+      }
+      function endDraw() { drawing = false; }
+      canvas.addEventListener("mousedown", startDraw);
+      canvas.addEventListener("mousemove", moveDraw);
+      canvas.addEventListener("mouseup", endDraw);
+      canvas.addEventListener("mouseleave", endDraw);
+      canvas.addEventListener("touchstart", startDraw, { passive: false });
+      canvas.addEventListener("touchmove", moveDraw, { passive: false });
+      canvas.addEventListener("touchend", endDraw);
+      document.getElementById("sig-canvas-clear").addEventListener("click", () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        hasDrawn = false;
+      });
+
+      // ===== FILE UPLOAD =====
+      let uploadedDataUrl = null;
+      const fileInput = document.getElementById("sig-file");
+      const previewWrap = document.getElementById("sig-uploaded-preview");
+      const previewImg = document.getElementById("sig-uploaded-img");
+      fileInput.addEventListener("change", (e) => {
+        const f = e.target.files?.[0];
+        if (!f) { uploadedDataUrl = null; previewWrap.classList.add("hidden"); return; }
+        if (f.size > 300_000) { alert("File troppo grande (max 300KB)"); fileInput.value = ""; return; }
+        if (!/^image\/(png|jpe?g)$/i.test(f.type)) { alert("Formato non valido (PNG o JPEG)"); fileInput.value = ""; return; }
+        const reader = new FileReader();
+        reader.onload = () => {
+          uploadedDataUrl = String(reader.result);
+          previewImg.src = uploadedDataUrl;
+          previewWrap.classList.remove("hidden");
+        };
+        reader.readAsDataURL(f);
+      });
+
+      // ===== SUBMIT =====
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        errEl.classList.add("hidden");
+        okEl.classList.add("hidden");
+        const typed = document.getElementById("typed-signature").value.trim();
+        const consent = document.getElementById("consent-cb").checked;
+        if (!typed) { errEl.textContent = "Inserisci il tuo nome."; errEl.classList.remove("hidden"); return; }
+        if (!consent) { errEl.textContent = "Devi accettare il consenso per firmare."; errEl.classList.remove("hidden"); return; }
+
+        // Costruisco il payload in base alla modalità
+        let imageSignatureData = null;
+        if (sigMode === "drawn") {
+          if (!hasDrawn) {
+            errEl.textContent = "Disegna la tua firma sul canvas."; errEl.classList.remove("hidden"); return;
+          }
+          imageSignatureData = canvas.toDataURL("image/png");
+        } else if (sigMode === "uploaded") {
+          if (!uploadedDataUrl) {
+            errEl.textContent = "Carica un'immagine della tua firma."; errEl.classList.remove("hidden"); return;
+          }
+          imageSignatureData = uploadedDataUrl;
+        }
+
+        if (expectedName && typed.toLowerCase() !== expectedName.toLowerCase()) {
+          if (!confirm(`Hai digitato "${typed}" ma il documento è intestato a "${expectedName}". Vuoi procedere comunque?`)) {
+            return;
+          }
+        }
+
+        btn.disabled = true;
+        btn.textContent = "Firma in corso…";
+        try {
+          const r = await fetch(`/api/firma/${tokenStr}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              typedSignature: typed,
+              imageSignatureData,
+              signatureMethod: sigMode,
+              consent: true,
+            }),
+          });
+          const j = await r.json();
+          if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+          okEl.textContent = "Firma registrata. Grazie! La pagina si aggiornerà…";
+          okEl.classList.remove("hidden");
+          setTimeout(() => window.location.reload(), 1500);
+        } catch (e) {
+          errEl.textContent = "Errore: " + e.message;
+          errEl.classList.remove("hidden");
+          btn.disabled = false;
+          btn.textContent = "Firma documento";
+        }
+      });
+
+      document.getElementById("decline-btn")?.addEventListener("click", async () => {
+        const reason = prompt("Vuoi spiegare brevemente perché non firmi? (opzionale)");
+        if (!confirm("Confermi di non voler firmare? Questa scelta è registrata e non può essere modificata.")) return;
+        const r = await fetch(`/api/firma/${tokenStr}/decline`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: reason || null }),
+        });
+        if (r.ok) window.location.reload();
+      });
+    }
+  </script>
+</BaseLayout>

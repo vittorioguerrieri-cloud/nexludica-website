@@ -1,0 +1,340 @@
+---
+/**
+ * Lista contatti CRM-lite NexLudica.
+ *
+ * - Tabella con filtri (status, tag, query testuale)
+ * - "+ Nuovo contatto" apre modal di creazione rapida
+ * - Click su riga → /area-soci/contatti/:id (dettaglio + log interazioni)
+ * - Promemoria follow-up evidenziati se scaduti / oggi
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { listContacts, listAllTags, statusLabel, type Contact } from "../../../server/contacts";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+let contacts: Contact[] = [];
+let allTags: string[] = [];
+let usersList: Array<{ id: string; name: string }> = [];
+if (db) {
+  contacts = await listContacts(db);
+  allTags = await listAllTags(db);
+  const { results } = await db.prepare("SELECT id, name FROM users ORDER BY name").all();
+  usersList = (results ?? []).map((r) => ({ id: String((r as any).id), name: String((r as any).name) }));
+}
+
+function statusBadge(s: Contact["status"]): string {
+  switch (s) {
+    case "lead":     return "bg-sky-100 text-sky-700";
+    case "active":   return "bg-emerald-100 text-emerald-700";
+    case "cold":     return "bg-amber-100 text-amber-700";
+    case "closed":   return "bg-nx-gray-light/40 text-nx-gray-dark";
+    case "archived": return "bg-nx-gray-light/40 text-nx-gray-dark";
+  }
+}
+
+const userNameById: Record<string, string> = {};
+for (const u of usersList) userNameById[u.id] = u.name;
+
+const todayMid = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
+function followUpClass(ts: number | null): string {
+  if (ts == null) return "";
+  if (ts < todayMid) return "text-red-600 font-bold";
+  if (ts < todayMid + 86400000) return "text-amber-600 font-bold";
+  return "text-nx-gray-dark";
+}
+function fmtDate(ts: number | null): string {
+  if (ts == null) return "—";
+  return new Date(ts).toLocaleDateString("it-IT");
+}
+---
+
+<AreaSociLayout title="Contatti — Area Soci" active="contatti">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Contatti</h2>
+      <p class="mt-1 max-w-2xl text-sm text-nx-gray-dark">
+        CRM dell'associazione. Persone esterne (partner, enti, sponsor, giornaliste, giocatori interessati)
+        che abbiamo conosciuto, con log delle interazioni e promemoria di follow-up.
+      </p>
+    </div>
+    <button id="new-contact-btn"
+      class="rounded-md bg-nx-cyan px-4 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+      + Nuovo contatto
+    </button>
+  </div>
+
+  {/* Filtri */}
+  <section class="mt-6 rounded-xl border border-nx-gray-light/20 bg-white p-4">
+    <div class="grid gap-3 sm:grid-cols-[1fr_180px_180px_140px]">
+      <div>
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Cerca</label>
+        <input id="filter-q" type="text" placeholder="Nome, organizzazione, email, città…" maxlength="80"
+          class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+      </div>
+      <div>
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Stato</label>
+        <select id="filter-status" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+          <option value="">— tutti —</option>
+          <option value="lead">Lead</option>
+          <option value="active" selected>Attivi</option>
+          <option value="cold">Freddi</option>
+          <option value="closed">Chiusi</option>
+          <option value="archived">Archiviati</option>
+          <option value="ALL_NOT_ARCHIVED">Tutti tranne archiviati</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Tag</label>
+        <select id="filter-tag" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+          <option value="">— qualunque —</option>
+          {allTags.map((t) => <option value={t}>{t}</option>)}
+        </select>
+      </div>
+      <div>
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Referente</label>
+        <select id="filter-owner" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+          <option value="">— tutti —</option>
+          <option value={user.id}>Io ({user.name.split(" ")[0]})</option>
+          {usersList.filter((u) => u.id !== user.id).map((u) => <option value={u.id}>{u.name}</option>)}
+        </select>
+      </div>
+    </div>
+  </section>
+
+  {/* Lista */}
+  <section class="mt-6">
+    {contacts.length === 0 ? (
+      <div class="rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-10 text-center text-sm text-nx-gray-dark">
+        Nessun contatto ancora. Clicca "+ Nuovo contatto" per iniziare.
+      </div>
+    ) : (
+      <ul id="contacts-list" class="space-y-2">
+        {contacts.map((c) => {
+          const tagsStr = c.tags.join(" ");
+          const owner = c.ownedBy ? userNameById[c.ownedBy] : null;
+          return (
+            <li
+              data-contact-row
+              data-q={`${c.fullName} ${c.organization ?? ""} ${c.email ?? ""} ${c.city ?? ""} ${c.role ?? ""}`.toLowerCase()}
+              data-status={c.status}
+              data-tags={tagsStr}
+              data-owner={c.ownedBy ?? ""}
+            >
+              <a href={`/area-soci/contatti/${c.id}`}
+                class="block rounded-lg border border-nx-gray-light/20 bg-white p-4 no-underline transition hover:-translate-y-0.5 hover:border-nx-cyan hover:shadow-md">
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-baseline gap-2">
+                      <p class="text-base font-bold text-nx-dark">{c.fullName}</p>
+                      {c.role && <span class="text-xs text-nx-gray-dark">— {c.role}</span>}
+                      {c.organization && <span class="text-xs text-nx-cyan">· {c.organization}</span>}
+                    </div>
+                    <dl class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-nx-gray-dark">
+                      {c.email && <div><dt class="inline font-semibold">@</dt> <dd class="inline">{c.email}</dd></div>}
+                      {c.phone && <div><dt class="inline font-semibold">tel</dt> <dd class="inline">{c.phone}</dd></div>}
+                      {c.city && <div><dt class="inline font-semibold">📍</dt> <dd class="inline">{c.city}</dd></div>}
+                      {owner && <div><dt class="inline font-semibold">ref.</dt> <dd class="inline">{owner}</dd></div>}
+                    </dl>
+                    {c.tags.length > 0 && (
+                      <div class="mt-2 flex flex-wrap gap-1">
+                        {c.tags.map((t) => (
+                          <span class="rounded-full bg-nx-off-white px-2 py-0.5 text-[10px] font-semibold text-nx-gray-dark">{t}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div class="flex shrink-0 flex-col items-end gap-1">
+                    <span class={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusBadge(c.status)}`}>
+                      {statusLabel(c.status)}
+                    </span>
+                    {c.lastInteractionAt && (
+                      <span class="text-[10px] text-nx-gray-dark">ultimo: {fmtDate(c.lastInteractionAt)}</span>
+                    )}
+                    {c.followUpAt && (
+                      <span class={`text-[10px] ${followUpClass(c.followUpAt)}`}>follow-up: {fmtDate(c.followUpAt)}</span>
+                    )}
+                  </div>
+                </div>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+    <p id="empty-filter" class="mt-4 hidden text-center text-sm text-nx-gray-dark">
+      Nessun contatto corrisponde ai filtri.
+    </p>
+  </section>
+
+  {/* === NUOVO CONTATTO MODAL === */}
+  <div id="new-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-xl font-bold text-nx-dark">Nuovo contatto</h2>
+      <form id="new-form" class="mt-4 space-y-3">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Nome completo *</label>
+            <input name="fullName" required maxlength="120" autocomplete="off"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Organizzazione</label>
+            <input name="organization" maxlength="120" placeholder="es. Università di Genova"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Ruolo</label>
+            <input name="role" maxlength="80" placeholder="es. Ricercatrice"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Email</label>
+            <input name="email" type="email" maxlength="200"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Telefono</label>
+            <input name="phone" maxlength="60"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Città</label>
+            <input name="city" maxlength="80"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Stato</label>
+            <select name="status" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+              <option value="lead">Lead — primo contatto</option>
+              <option value="active" selected>Attivo</option>
+              <option value="cold">Freddo — da risvegliare</option>
+              <option value="closed">Chiuso</option>
+              <option value="archived">Archiviato</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Referente NexLudica</label>
+            <select name="ownedBy" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+              <option value={user.id} selected>Io ({user.name.split(" ")[0]})</option>
+              {usersList.filter((u) => u.id !== user.id).map((u) => <option value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Tag</label>
+            <input name="tagsCsv" maxlength="400" placeholder="es. partner, scuola, sponsor (separati da virgola)"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+            {allTags.length > 0 && (
+              <p class="mt-1 text-[10px] text-nx-gray-dark">Esistenti: {allTags.join(", ")}</p>
+            )}
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Come l'abbiamo conosciuta?</label>
+            <input name="source" maxlength="200" placeholder="es. MeetLudica #3, DM Instagram, presentato da Tizio"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Note</label>
+            <textarea name="notes" rows="3" maxlength="5000"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Promemoria follow-up</label>
+            <input name="followUpDate" type="date"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <p id="new-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+        <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-3">
+          <button type="button" id="new-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+          <button type="submit" class="rounded-md bg-nx-cyan px-5 py-2 text-sm font-bold text-white">Crea</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script is:inline>
+    // ==== FILTRI ====
+    const qEl = document.getElementById("filter-q");
+    const statusEl = document.getElementById("filter-status");
+    const tagEl = document.getElementById("filter-tag");
+    const ownerEl = document.getElementById("filter-owner");
+    const rows = Array.from(document.querySelectorAll("[data-contact-row]"));
+    const emptyEl = document.getElementById("empty-filter");
+    function applyFilters() {
+      const q = (qEl.value || "").toLowerCase().trim();
+      const st = statusEl.value;
+      const tg = tagEl.value;
+      const ow = ownerEl.value;
+      let shown = 0;
+      for (const row of rows) {
+        let visible = true;
+        if (q && !(row.dataset.q || "").includes(q)) visible = false;
+        if (visible && st === "ALL_NOT_ARCHIVED" && row.dataset.status === "archived") visible = false;
+        else if (visible && st && st !== "ALL_NOT_ARCHIVED" && row.dataset.status !== st) visible = false;
+        if (visible && tg && !(row.dataset.tags || "").split(" ").includes(tg)) visible = false;
+        if (visible && ow && row.dataset.owner !== ow) visible = false;
+        row.style.display = visible ? "" : "none";
+        if (visible) shown++;
+      }
+      emptyEl.classList.toggle("hidden", shown !== 0 || rows.length === 0);
+    }
+    [qEl, statusEl, tagEl, ownerEl].forEach((el) => el && el.addEventListener("input", applyFilters));
+    applyFilters();
+
+    // ==== NUOVO CONTATTO MODAL ====
+    const modal = document.getElementById("new-modal");
+    const form = document.getElementById("new-form");
+    document.getElementById("new-contact-btn").addEventListener("click", () => {
+      modal.classList.remove("hidden"); modal.classList.add("flex");
+      form.fullName.focus();
+    });
+    document.getElementById("new-cancel").addEventListener("click", () => {
+      modal.classList.add("hidden"); modal.classList.remove("flex");
+    });
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) { modal.classList.add("hidden"); modal.classList.remove("flex"); }
+    });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("new-err");
+      errEl.classList.add("hidden");
+      const fd = new FormData(form);
+      const tags = (fd.get("tagsCsv") || "").toString().split(",").map(t => t.trim()).filter(Boolean);
+      const followDate = (fd.get("followUpDate") || "").toString();
+      const payload = {
+        fullName: fd.get("fullName"),
+        organization: fd.get("organization") || null,
+        role: fd.get("role") || null,
+        email: fd.get("email") || null,
+        phone: fd.get("phone") || null,
+        city: fd.get("city") || null,
+        status: fd.get("status"),
+        ownedBy: fd.get("ownedBy") || null,
+        source: fd.get("source") || null,
+        notes: fd.get("notes") || null,
+        tags,
+        followUpAt: followDate ? new Date(followDate + "T12:00:00").getTime() : null,
+      };
+      try {
+        const r = await fetch("/api/contatti", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        window.location.href = `/area-soci/contatti/${j.contact.id}`;
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove("hidden");
+      }
+    });
+  </script>
+</AreaSociLayout>

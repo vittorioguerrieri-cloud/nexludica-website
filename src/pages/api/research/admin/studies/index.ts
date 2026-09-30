@@ -25,11 +25,17 @@ export const POST: APIRoute = async (ctx) => {
   const title = String(body.title ?? "").trim();
   if (!slug || !title) return json({ error: "slug e title obbligatori" }, 400);
   if (!/^[a-z0-9-]+$/.test(slug)) return json({ error: "slug invalido" }, 400);
+  // Valida status contro l'enum del CHECK constraint per evitare 500 confuso
+  const STATUS_VALUES = ["draft", "active", "closed"] as const;
+  const rawStatus = body.status as string | undefined;
+  if (rawStatus !== undefined && !STATUS_VALUES.includes(rawStatus as any)) {
+    return json({ error: `status deve essere uno di: ${STATUS_VALUES.join(", ")}` }, 400);
+  }
   try {
     const study = await createStudy(db, {
       slug, title,
       description: body.description ? String(body.description) : undefined,
-      status: (body.status as any) ?? "draft",
+      status: (rawStatus as typeof STATUS_VALUES[number] | undefined) ?? "draft",
       publicListing: body.publicListing !== false,
       anonymousCodeTemplate: body.anonymousCodeTemplate ? String(body.anonymousCodeTemplate) : undefined,
       identityFields: Array.isArray(body.identityFields) ? body.identityFields as string[] : undefined,

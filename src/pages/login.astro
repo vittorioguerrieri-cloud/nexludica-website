@@ -1,6 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import { getUser } from "../server/guards";
+import { readSessionCookie, setSessionCookie } from "../server/auth";
 
 export const prerender = false;
 
@@ -12,10 +13,51 @@ const errorMessages: Record<string, string> = {
 };
 const errorMsg = error ? errorMessages[error] ?? "Errore non riconosciuto." : null;
 
+// Param `next`: dopo il login, redirige a quella URL invece di /area-soci.
+// E' usato dal sottodominio playtest.nexludica.org e da altri subdomain.
+const nextParam = Astro.url.searchParams.get("next");
+function safeNextUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    // Solo redirect a host nexludica.org o suoi subdomain
+    if (u.hostname === "nexludica.org" || u.hostname.endsWith(".nexludica.org")) {
+      return u.toString();
+    }
+  } catch {
+    // Forse e' un path relativo
+    if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  }
+  return null;
+}
+const safeNext = safeNextUrl(nextParam);
+
 // Se l'utente e' gia' loggato, redirect.
+//
+// IMPORTANTE: se il `next` punta a un subdomain (es. playtest.nexludica.org)
+// e il cookie di sessione non e' ancora scoped a .nexludica.org, il subdomain
+// non lo vedrebbe → loop. Per evitare il loop, riemettiamo il cookie con
+// Domain=.nexludica.org PRIMA di redirigere, in modo che il subdomain target
+// abbia la sessione visibile.
 const user = await getUser(Astro);
 if (user) {
-  return Astro.redirect("/area-soci");
+  const target = safeNext ?? "/area-soci";
+  const targetIsSubdomain = (() => {
+    try {
+      const u = new URL(target, Astro.url.origin);
+      return u.hostname !== Astro.url.hostname && u.hostname.endsWith(".nexludica.org");
+    } catch {
+      return false;
+    }
+  })();
+  const sid = readSessionCookie(Astro.request);
+  if (targetIsSubdomain && sid) {
+    // Riemetti il cookie con Domain=.nexludica.org (cross-subdomain) e redirigi.
+    const headers = new Headers({ Location: target });
+    setSessionCookie(headers, sid, Astro.url.protocol === "https:", Astro.url.hostname);
+    return new Response(null, { status: 302, headers });
+  }
+  return Astro.redirect(target);
 }
 ---
 
@@ -91,7 +133,7 @@ if (user) {
       <div id="login-error" class="mt-6 hidden rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"></div>
 
       <p class="mt-8 text-xs text-nx-gray-dark">
-        Sei un nuovo socio o hai problemi ad accedere? Scrivi a
+        Ti sei appena iscrittə o hai problemi ad accedere? Scrivi a
         <a href="mailto:info@nexludica.org" class="text-nx-cyan no-underline hover:underline">info@nexludica.org</a>.
       </p>
     </div>
@@ -184,7 +226,18 @@ if (user) {
           err.textContent = data.error || "Credenziali non valide.";
           err.classList.remove("hidden");
         } else {
-          window.location.href = data.redirect || "/area-soci";
+          // Se il login viene da un subdomain (es. playtest.nexludica.org)
+          // c'e' un param `next` da rispettare.
+          const params = new URLSearchParams(window.location.search);
+          const nxt = params.get("next");
+          let target = data.redirect || "/area-soci";
+          if (nxt) {
+            try {
+              const u = new URL(nxt, window.location.origin);
+              if (u.hostname === "nexludica.org" || u.hostname.endsWith(".nexludica.org")) target = u.toString();
+            } catch {}
+          }
+          window.location.href = target;
         }
       } catch (e) {
         err.textContent = "Errore di rete";

@@ -1,12 +1,26 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import { getDb, getEnv } from "../server/db";
-import { listPublicMembers, type PublicMember } from "../server/profiles";
+import { listPublicMembers, slugifyName, type PublicMember } from "../server/profiles";
 
 export const prerender = false;
 
+// Cache-Control: no-store così ogni request riceve un ordinamento fresh
+// (le card del team vengono mostrate in ordine casuale ad ogni refresh).
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
 const env = await getEnv();
 const db = getDb(env as Env);
+
+// Fisher-Yates shuffle: ordine casuale uniforme.
+function shuffle<T>(arr: T[]): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // Lista membri caricata da D1 quando disponibile.
 let dbMembers: PublicMember[] = [];
@@ -31,10 +45,13 @@ const fallbackTeam: Array<{ name: string; skills: string }> = [
   { name: "Maria Pulinas", skills: "Impegno sociale · Carcere · Linguistica" },
 ];
 
-const team =
+// Mapping unificato: aggiungiamo anche cvOther/cvAcademic per il check di
+// "richness" del profilo (decide il bucket di ordinamento).
+const mapped =
   dbMembers.length > 0
     ? dbMembers.map((m) => ({
         name: m.name,
+        slug: m.slug,
         roleLabel: m.roleLabel,
         bio: m.bio,
         skills: m.skills,
@@ -42,10 +59,13 @@ const team =
         website: m.website,
         instagram: m.instagram,
         email: m.email,
+        cvOther: m.cvOther,
+        cvAcademic: m.cvAcademic,
         fromDb: true,
       }))
     : fallbackTeam.map((f) => ({
         name: f.name,
+        slug: slugifyName(f.name),
         roleLabel: null,
         bio: null,
         skills: f.skills,
@@ -53,18 +73,45 @@ const team =
         website: null,
         instagram: null,
         email: null,
+        cvOther: null,
+        cvAcademic: null,
         fromDb: false,
       }));
+
+// Bucketing in 4 livelli (foto e contenuto bio sono ortogonali):
+//   1. Foto + bio → top tier (profili completi)
+//   2. Foto, no bio → second tier
+//   3. Bio, no foto → third tier
+//   4. Nessuno dei due → bottom tier
+// Dentro ogni bucket l'ordine e' randomizzato a ogni refresh.
+function hasBio(p: typeof mapped[number]): boolean {
+  return !!(
+    (p.bio && p.bio.trim().length > 0) ||
+    (p.cvOther && p.cvOther.trim().length > 0) ||
+    (p.cvAcademic && p.cvAcademic.trim().length > 0)
+  );
+}
+function hasPhoto(p: typeof mapped[number]): boolean {
+  return !!(p.photoUrl && p.photoUrl.trim().length > 0);
+}
+
+const photoAndBio = shuffle(mapped.filter((p) => hasPhoto(p) && hasBio(p)));
+const photoOnly  = shuffle(mapped.filter((p) => hasPhoto(p) && !hasBio(p)));
+const bioOnly    = shuffle(mapped.filter((p) => !hasPhoto(p) && hasBio(p)));
+const neither    = shuffle(mapped.filter((p) => !hasPhoto(p) && !hasBio(p)));
+
+const team = [...photoAndBio, ...photoOnly, ...bioOnly, ...neither];
 ---
 
-<BaseLayout title="Chi siamo — NexLudica APS" description="NexLudica APS: associazione che usa il gioco da tavolo per ricerca, inclusione e formazione. Mission, valori e team.">
+<BaseLayout title="Chi siamo — NexLudica APS" description="NexLudica APS: associazione che usa il gioco da tavolo per ricerca, equità e formazione. Mission, valori (femminismo, diritti queer e non binari, antirazzismo) e team.">
   <section class="nx-hero-pattern px-4 pb-16 pt-28 text-center">
     <h1 class="text-4xl font-extrabold text-nx-dark md:text-5xl" style="font-family: var(--font-display);">
       Chi siamo
     </h1>
     <p class="mx-auto mt-4 max-w-2xl text-lg text-nx-gray-dark">
-      Un gruppo di appassionati di gioco da tavolo, ricercatori, artisti e game designer
-      che credono nel potere formativo, sociale e motivazionale del gioco.
+      Un gruppo di persone appassionate di gioco da tavolo — chi fa ricerca, chi disegna
+      giochi, chi crea arte — accomunate dalla fiducia nel potere formativo, sociale e
+      motivazionale del gioco. Femministe, queer-affirming, antidiscriminatorie.
     </p>
   </section>
 
@@ -76,7 +123,7 @@ const team =
           Giocare è molto più che un passatempo: è un'esperienza che coinvolge mente e
           relazioni. NexLudica nasce per esplorare il potenziale trasformativo del gioco
           da tavolo come strumento per promuovere il benessere psicologico, favorire
-          l'inclusione sociale e sviluppare competenze trasversali.
+          l'equità sociale e sviluppare competenze trasversali.
         </p>
         <p class="mt-4 text-nx-gray-dark leading-relaxed">
           Il nostro approccio combina <strong class="text-nx-dark">ricerca scientifica</strong>,
@@ -112,13 +159,15 @@ const team =
             </div>
           </li>
           <li class="flex items-start gap-4">
-            <span class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-sm font-bold text-nx-cyan">I</span>
+            <span class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-sm font-bold text-nx-cyan">E</span>
             <div>
-              <strong class="text-nx-dark">Inclusion</strong>
+              <strong class="text-nx-dark">Equity</strong>
               <p class="mt-1 text-nx-gray-dark">
-                Abbiamo l'obiettivo di creare spazi di crescita e connessione.
-                Ognuno in NexLudica ha occasione di contribuire e sentirsi parte
-                di qualcosa più grande.
+                Lavoriamo per spazi di crescita e connessione realmente equi:
+                rimuoviamo barriere all'accesso, distribuiamo le opportunità,
+                riconosciamo che persone diverse partono da posizioni diverse.
+                L'inclusione è la condizione di partenza; l'equità è la nostra
+                bussola.
               </p>
             </div>
           </li>
@@ -126,64 +175,95 @@ const team =
       </div>
 
       <div>
+        <h2 class="text-2xl font-bold text-nx-dark">I nostri valori</h2>
+        <p class="mt-4 text-nx-gray-dark leading-relaxed">
+          NexLudica è uno spazio dichiaratamente femminista, queer-affirming e
+          antidiscriminatorio. I valori sotto guidano ogni nostro progetto,
+          dalla ricerca al playtest, dagli eventi alla comunicazione.
+        </p>
+        <ul class="mt-5 grid gap-3 sm:grid-cols-2">
+          <li class="rounded-lg border border-nx-gray-light/20 bg-white p-4">
+            <strong class="text-nx-dark">Femminismo</strong>
+            <p class="mt-1 text-sm text-nx-gray-dark">
+              Riconosciamo e contrastiamo le disparità di genere strutturali, dentro
+              e fuori dal gioco. Promuoviamo design, rappresentazione e leadership
+              che mettano al centro voci storicamente sotto-rappresentate.
+            </p>
+          </li>
+          <li class="rounded-lg border border-nx-gray-light/20 bg-white p-4">
+            <strong class="text-nx-dark">Diritti delle persone queer e non binarie</strong>
+            <p class="mt-1 text-sm text-nx-gray-dark">
+              Affermiamo l'identità e l'autodeterminazione delle persone LGBTQIA+
+              e non binarie. Usiamo linguaggio inclusivo, nei nostri spazi sono
+              benvenute tutte le identità e le espressioni di genere.
+            </p>
+          </li>
+          <li class="rounded-lg border border-nx-gray-light/20 bg-white p-4">
+            <strong class="text-nx-dark">Antirazzismo e accessibilità</strong>
+            <p class="mt-1 text-sm text-nx-gray-dark">
+              Lavoriamo per spazi liberi da razzismo, abilismo e altre forme di
+              discriminazione. Progettiamo esperienze ludiche tenendo conto di
+              barriere economiche, cognitive, sensoriali e culturali.
+            </p>
+          </li>
+          <li class="rounded-lg border border-nx-gray-light/20 bg-white p-4">
+            <strong class="text-nx-dark">Trasparenza e dati aperti</strong>
+            <p class="mt-1 text-sm text-nx-gray-dark">
+              Pubblichiamo procedure, risultati di ricerca e processi decisionali.
+              Vogliamo che la nostra pratica sia replicabile, verificabile e
+              contestabile.
+            </p>
+          </li>
+        </ul>
+      </div>
+
+      <div>
         <h2 class="text-2xl font-bold text-nx-dark">Il team</h2>
         <p class="mt-4 text-nx-gray-dark leading-relaxed">
-          Soci e collaboratori di NexLudica con le rispettive aree di competenza.
+          Le persone di NexLudica con le rispettive aree di competenza.
         </p>
         <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {team.map((p) => (
-            <article class="group overflow-hidden rounded-2xl border border-nx-gray-light/20 bg-white transition hover:-translate-y-1 hover:shadow-lg">
-              <div class="relative aspect-square overflow-hidden bg-nx-off-white">
-                {p.photoUrl ? (
-                  <img
-                    src={p.photoUrl}
-                    alt={p.name}
-                    class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div class="flex h-full w-full items-center justify-center bg-nx-cyan-light">
-                    <span class="text-6xl font-black text-nx-cyan">
-                      {p.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
-                    </span>
-                  </div>
-                )}
-                {p.roleLabel && (
-                  <span class="absolute left-4 top-4 rounded-full bg-nx-cyan px-3 py-1 text-xs font-bold uppercase tracking-wider text-white shadow-md">
-                    {p.roleLabel}
-                  </span>
-                )}
-              </div>
-              <div class="p-5">
-                <p class="text-lg font-bold text-nx-dark">{p.name}</p>
-                {p.skills && (
-                  <p class="mt-1 text-xs text-nx-gray-dark">{p.skills}</p>
-                )}
-                {p.bio && (
-                  <p class="mt-3 whitespace-pre-line text-sm leading-relaxed text-nx-gray-dark">{p.bio}</p>
-                )}
-                {(p.website || p.instagram || p.email) && (
-                  <div class="mt-4 flex flex-wrap gap-3 text-xs">
-                    {p.email && (
-                      <a href={`mailto:${p.email}`} class="font-semibold text-nx-cyan no-underline hover:underline">
-                        ✉ Scrivi
-                      </a>
-                    )}
-                    {p.website && (
-                      <a href={p.website} target="_blank" rel="noopener noreferrer" class="font-semibold text-nx-cyan no-underline hover:underline">
-                        Sito web →
-                      </a>
-                    )}
-                    {p.instagram && (
-                      <a href={p.instagram} target="_blank" rel="noopener noreferrer" class="font-semibold text-nx-cyan no-underline hover:underline">
-                        Instagram →
-                      </a>
-                    )}
-                  </div>
-                )}
-              </div>
-            </article>
-          ))}
+          {team.map((p) => {
+            const Card = p.fromDb ? "a" : "div";
+            const cardProps = p.fromDb ? { href: `/chi-siamo/${p.slug}` } : {};
+            return (
+              <Card
+                {...cardProps}
+                class={`group overflow-hidden rounded-2xl border border-nx-gray-light/20 bg-white no-underline transition hover:-translate-y-1 hover:shadow-lg ${p.fromDb ? "cursor-pointer" : ""}`}
+              >
+                <div class="relative aspect-square overflow-hidden bg-nx-off-white">
+                  {p.photoUrl ? (
+                    <img
+                      src={p.photoUrl}
+                      alt={p.name}
+                      class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div class="flex h-full w-full items-center justify-center bg-nx-cyan-light">
+                      <span class="text-6xl font-black text-nx-cyan">
+                        {p.name.split(" ").filter(Boolean).map((s) => s[0]).slice(0, 2).join("")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div class="p-5">
+                  <p class="text-lg font-bold text-nx-dark">{p.name}</p>
+                  {p.skills && (
+                    <p class="mt-1 text-xs text-nx-gray-dark">{p.skills}</p>
+                  )}
+                  {p.bio && (
+                    <p class="mt-3 whitespace-pre-line text-sm leading-relaxed text-nx-gray-dark line-clamp-3">{p.bio}</p>
+                  )}
+                  {p.fromDb && (
+                    <p class="mt-4 text-xs font-semibold text-nx-cyan transition group-hover:translate-x-0.5">
+                      Vai al profilo →
+                    </p>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
       </div>
 

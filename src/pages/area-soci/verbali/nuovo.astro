@@ -1,0 +1,638 @@
+---
+/**
+ * Tool di creazione di un verbale.
+ *
+ * Form a sezioni: tipo + intestazione → presenti/assenti → ordine del giorno
+ * → firmatari → preview. Al submit crea il verbale come draft e ridireziona
+ * alla pagina di dettaglio dove si fa preview + invia in firma.
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getUser } from "../../../server/guards";
+import { DEFAULT_SIGNERS } from "../../../server/verbali";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return new Response("Solo admin", { status: 403 });
+
+const today = new Date().toISOString().slice(0, 10);
+const defaultSignersJson = JSON.stringify(DEFAULT_SIGNERS);
+---
+
+<AreaSociLayout title="Nuovo verbale — Area Soci" active="verbali">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <a href="/area-soci/verbali" class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">← Indietro</a>
+      <h2 class="mt-2 text-2xl font-bold text-nx-dark">Nuovo verbale</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Compila i dati, salva come bozza, poi dalla pagina del verbale fai preview PDF e invia in firma via SignWell.
+      </p>
+    </div>
+  </div>
+
+  <form id="verbale-form" class="mt-8 space-y-6">
+    {/* === TIPO + DATA + LUOGO === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Intestazione</h3>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Tipo *</label>
+          <select id="f-type" name="type" required
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+            <option value="">— scegli —</option>
+            <option value="assemblea_ordinaria">Assemblea Ordinaria dei Soci</option>
+            <option value="assemblea_straordinaria">Assemblea Straordinaria dei Soci</option>
+            <option value="consiglio_direttivo">Consiglio Direttivo</option>
+            <option value="riunione_operativa">Riunione operativa / team</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Titolo *</label>
+          <input id="f-title" name="title" required maxlength="200" placeholder="es. Verbale Assemblea Ordinaria 21/05/2026"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          <p class="mt-1 text-[10px] text-nx-gray-dark">Auto-generato dal tipo + data se lasciato vuoto al cambio di tipo.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Data *</label>
+          <input id="f-date" name="meetingDate" type="date" required value={today}
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Ora inizio</label>
+          <input id="f-time" name="meetingTime" type="time"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div class="sm:col-start-1">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Ora fine</label>
+          <input id="f-end-time" name="meetingEndTime" type="time"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          <p class="mt-1 text-[10px] text-nx-gray-dark">Auto-impostato a 30 minuti dopo l'inizio. Modifica se diverso.</p>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Luogo</label>
+          <input name="location" maxlength="200" placeholder="es. Sede legale, Vico Barnabiti 10 — Genova"
+            value="Sede legale, Vico Barnabiti 10 — Genova"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Presidente seduta</label>
+          <input name="presidentName" maxlength="80" placeholder="es. Vittorio Guerrieri" value="Vittorio Guerrieri"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Segretario verbalizzante</label>
+          <input name="secretaryName" maxlength="80" placeholder="es. Raluca Fulgu" value="Raluca Fulgu"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+      </div>
+    </section>
+
+    {/* === PARTECIPANTI === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Partecipanti</h3>
+      <p id="expected-hint" class="mt-1 text-xs text-nx-gray-dark">
+        Seleziona il tipo verbale per caricare i partecipanti attesi.
+      </p>
+
+      {/* Pool di partecipanti attesi (caricato via API in base al tipo) */}
+      <div id="expected-pool" class="mt-4 hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Partecipanti attesi <span class="text-nx-gray-dark normal-case">(<span id="expected-count">0</span>)</span>
+          </h4>
+          <div class="flex gap-1 text-[11px]">
+            <button type="button" id="check-all" class="rounded border border-nx-gray-light/40 px-2 py-1 hover:border-nx-cyan hover:text-nx-cyan">Tutti presenti</button>
+            <button type="button" id="uncheck-all" class="rounded border border-nx-gray-light/40 px-2 py-1 hover:border-nx-cyan hover:text-nx-cyan">Tutti assenti</button>
+          </div>
+        </div>
+        <p class="mt-1 text-[11px] text-nx-gray-dark">
+          Spunta chi è effettivamente presente. Chi resta non spuntato verrà inserito come <strong>assente</strong>.
+          Marca "giustificato" per chi ha comunicato l'assenza.
+        </p>
+        <ul id="pool-list" class="mt-3 divide-y divide-nx-gray-light/20"></ul>
+      </div>
+
+      {/* Riepilogo + aggiunta extras */}
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        <div class="min-w-0">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Presenti <span class="text-nx-gray-dark normal-case">(<span id="present-count">0</span>)</span>
+          </h4>
+          <ul id="present-list" class="mt-2 space-y-1.5"></ul>
+          <details class="mt-2">
+            <summary class="cursor-pointer text-xs text-nx-cyan hover:underline">+ Aggiungi presente extra</summary>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <input id="add-present-name" placeholder="Nome" maxlength="80"
+                class="min-w-0 flex-1 basis-32 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+              <input id="add-present-role" placeholder="Ruolo (opz.)" maxlength="80"
+                class="min-w-0 flex-1 basis-32 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+              <button type="button" id="add-present-btn"
+                class="shrink-0 rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+</button>
+            </div>
+            <p class="mt-1 text-[10px] text-nx-gray-dark">Per persone esterne (ospiti, invitati).</p>
+          </details>
+        </div>
+        <div class="min-w-0">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Assenti <span class="text-nx-gray-dark normal-case">(<span id="absent-count">0</span>)</span>
+          </h4>
+          <ul id="absent-list" class="mt-2 space-y-1.5"></ul>
+          <details class="mt-2">
+            <summary class="cursor-pointer text-xs text-nx-cyan hover:underline">+ Aggiungi assente extra</summary>
+            <div class="mt-2 space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <input id="add-absent-name" placeholder="Nome" maxlength="80"
+                  class="min-w-0 flex-1 basis-32 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+                <button type="button" id="add-absent-btn"
+                  class="shrink-0 rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+</button>
+              </div>
+              <label class="flex items-center gap-1 text-xs text-nx-gray-dark">
+                <input id="add-absent-justified" type="checkbox" class="rounded text-nx-cyan focus:ring-nx-cyan" />
+                giustificato
+              </label>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    {/* === ORDINE DEL GIORNO === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Ordine del giorno e decisioni</h3>
+          <p class="mt-1 text-xs text-nx-gray-dark" id="agenda-hint">Aggiungi un punto per ogni argomento trattato. Discussione e decisione sono opzionali.</p>
+        </div>
+        {/* Toggle Strutturato / Markdown.
+            Stato condiviso via classList.toggle su singole classi (no className=
+            distruttivo → no flicker). `transition-colors` evita di animare layout. */}
+        <div class="inline-flex rounded-md border border-nx-gray-light/40 p-0.5 text-xs">
+          <button type="button" id="agenda-mode-structured"
+            class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none bg-nx-cyan text-white">
+            Strutturato
+          </button>
+          <button type="button" id="agenda-mode-markdown"
+            class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none text-nx-dark hover:bg-nx-off-white">
+            Markdown
+          </button>
+        </div>
+      </div>
+
+      {/* Modalità strutturata (default) */}
+      <div id="agenda-structured" class="mt-4">
+        <ul id="agenda-list" class="space-y-3"></ul>
+        <button type="button" id="add-agenda-btn"
+          class="mt-3 w-full rounded-md border-2 border-dashed border-nx-cyan/40 px-3 py-2 text-sm font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light">
+          + Aggiungi punto
+        </button>
+      </div>
+
+      {/* Modalità markdown libero */}
+      <div id="agenda-markdown-wrap" class="mt-4 hidden">
+        <p class="text-[11px] text-nx-gray-dark">
+          Scrivi liberamente in markdown. Heading <code>###</code>, liste <code>-</code>,
+          grassetto <code>**bold**</code>, italico <code>_italic_</code>.
+        </p>
+        <textarea id="agenda-markdown" name="agendaMarkdown" rows="14" maxlength="20000"
+          placeholder={`### 1. Approvazione bilancio\nDopo discussione approfondita, il bilancio è stato approvato all'unanimità.\n\n**Decisione:** Approvato.\n\n### 2. Programma attività 2026\n…`}
+          class="mt-2 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 font-mono text-xs leading-relaxed focus:border-nx-cyan focus:outline-none"></textarea>
+      </div>
+    </section>
+
+    {/* === TESTO LIBERO === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Note aggiuntive (opzionale)</h3>
+      <textarea name="bodyExtra" rows="4" maxlength="10000" placeholder="Eventuali allegati, comunicazioni, varie ed eventuali…"
+        class="mt-2 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+    </section>
+
+    {/* === FIRMATARI === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Firmatari</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Di default: Vittorio + Raluca. Aggiungi/rimuovi per modificare. SignWell invierà l'email di richiesta firma a ognuno.</p>
+      <ul id="signers-list" class="mt-3 space-y-1.5"></ul>
+      <div class="mt-2 flex gap-2">
+        <input id="add-signer-name" placeholder="Nome" maxlength="80"
+          class="flex-1 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+        <input id="add-signer-email" type="email" placeholder="Email" maxlength="120"
+          class="flex-1 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+        <button type="button" id="add-signer-btn" class="rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+</button>
+      </div>
+    </section>
+
+    <p id="form-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+    <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-5">
+      <a href="/area-soci/verbali" class="text-sm font-semibold text-nx-gray-dark no-underline hover:text-nx-cyan">Annulla</a>
+      <button type="submit" class="rounded-md bg-nx-cyan px-5 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+        Salva come bozza
+      </button>
+    </div>
+  </form>
+
+  <script is:inline define:vars={{ defaultSignersJson }}>
+    const state = {
+      // Pool dei partecipanti attesi (caricato via API in base al tipo verbale):
+      // [{ id, name, role, board_role_label, isPresent, isJustified }]
+      pool: [],
+      // Extra: persone aggiunte manualmente (non in pool)
+      extraPresent: [],   // [{ name, role }]
+      extraAbsent: [],    // [{ name, justified }]
+      agendaItems: [],
+      agendaMode: "structured",    // "structured" | "markdown"
+      agendaMarkdown: "",
+      signers: JSON.parse(defaultSignersJson),
+    };
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // === POOL: partecipanti attesi (caricato in base al tipo verbale) ===
+    // Quando l'utente cambia il tipo, fetch dei partecipanti attesi.
+    let lastFetchedType = "";
+    async function fetchExpectedPool(type) {
+      if (!type || type === lastFetchedType) return;
+      lastFetchedType = type;
+      try {
+        const r = await fetch(`/api/verbali/expected-attendees?type=${encodeURIComponent(type)}`);
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        // Rimappa il pool. Se ho già un pool e cambio tipo, preservo le scelte
+        // per gli utenti che restano (matchando per id).
+        const prevById = {};
+        for (const p of state.pool) prevById[p.id] = p;
+        state.pool = j.attendees.map((a) => {
+          const prev = prevById[a.id];
+          return {
+            id: a.id,
+            name: a.name,
+            role: a.board_role_label || null,  // ruolo direttivo se applicabile
+            isPresent: prev ? prev.isPresent : false,
+            isJustified: prev ? prev.isJustified : false,
+          };
+        });
+        renderPool();
+        renderPresent();
+        renderAbsent();
+      } catch (e) {
+        document.getElementById("expected-hint").textContent = "Errore caricamento partecipanti: " + e.message;
+      }
+    }
+    document.getElementById("f-type").addEventListener("change", (e) => {
+      fetchExpectedPool(e.target.value);
+    });
+
+    function renderPool() {
+      const wrap = document.getElementById("expected-pool");
+      const hint = document.getElementById("expected-hint");
+      const list = document.getElementById("pool-list");
+      const count = document.getElementById("expected-count");
+      if (state.pool.length === 0) {
+        wrap.classList.add("hidden");
+        hint.textContent = lastFetchedType
+          ? "Nessun partecipante atteso per questo tipo. Aggiungi manualmente sotto."
+          : "Seleziona il tipo verbale per caricare i partecipanti attesi.";
+        return;
+      }
+      wrap.classList.remove("hidden");
+      hint.textContent = "Per default tutti sono assenti. Spunta chi è presente. Marca giustificato se opportuno.";
+      count.textContent = state.pool.length;
+      list.innerHTML = state.pool.map((p, i) => `
+        <li class="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+          <label class="flex flex-1 min-w-0 items-center gap-2 cursor-pointer">
+            <input type="checkbox" data-pool-present="${i}" ${p.isPresent ? "checked" : ""}
+              class="h-4 w-4 rounded text-nx-cyan focus:ring-nx-cyan" />
+            <span class="min-w-0 truncate">
+              <strong>${esc(p.name)}</strong>
+              ${p.role ? `<span class="text-xs text-nx-cyan"> · ${esc(p.role)}</span>` : ""}
+            </span>
+          </label>
+          <label class="flex items-center gap-1 text-[11px] text-nx-gray-dark" data-justified-wrap="${i}" style="${p.isPresent ? 'visibility:hidden;' : ''}">
+            <input type="checkbox" data-pool-justified="${i}" ${p.isJustified ? "checked" : ""}
+              class="h-3.5 w-3.5 rounded text-emerald-600 focus:ring-emerald-500" />
+            giustificato
+          </label>
+        </li>`).join("");
+    }
+    document.getElementById("pool-list").addEventListener("change", (e) => {
+      const t = e.target;
+      if (t.dataset.poolPresent != null) {
+        const i = Number(t.dataset.poolPresent);
+        state.pool[i].isPresent = t.checked;
+        if (t.checked) state.pool[i].isJustified = false;  // presente non è giustificato
+        // Toggle visibilità label "giustificato"
+        const wrap = document.querySelector(`[data-justified-wrap="${i}"]`);
+        if (wrap) wrap.style.visibility = t.checked ? "hidden" : "";
+        renderPresent();
+        renderAbsent();
+      } else if (t.dataset.poolJustified != null) {
+        state.pool[Number(t.dataset.poolJustified)].isJustified = t.checked;
+        renderAbsent();
+      }
+    });
+    document.getElementById("check-all").addEventListener("click", () => {
+      state.pool.forEach((p) => { p.isPresent = true; p.isJustified = false; });
+      renderPool(); renderPresent(); renderAbsent();
+    });
+    document.getElementById("uncheck-all").addEventListener("click", () => {
+      state.pool.forEach((p) => { p.isPresent = false; });
+      renderPool(); renderPresent(); renderAbsent();
+    });
+
+    // === Liste finali (pool checkati + extras) ===
+    function computeAttendeesPresent() {
+      const fromPool = state.pool.filter((p) => p.isPresent).map((p) => ({ name: p.name, role: p.role || undefined }));
+      return [...fromPool, ...state.extraPresent];
+    }
+    function computeAttendeesAbsent() {
+      const fromPool = state.pool.filter((p) => !p.isPresent).map((p) => ({ name: p.name, role: p.role || undefined, justified: p.isJustified }));
+      return [...fromPool, ...state.extraAbsent];
+    }
+
+    function renderPresent() {
+      const all = computeAttendeesPresent();
+      document.getElementById("present-count").textContent = all.length;
+      const el = document.getElementById("present-list");
+      el.innerHTML = all.length === 0
+        ? `<li class="text-xs italic text-nx-gray-dark">Nessuno.</li>`
+        : all.map((a, i) => {
+            const isExtra = i >= state.pool.filter((p) => p.isPresent).length;
+            const extraIdx = isExtra ? i - state.pool.filter((p) => p.isPresent).length : -1;
+            return `<li class="flex items-center justify-between gap-2 rounded border border-nx-gray-light/20 px-3 py-1.5 text-sm">
+              <span>
+                <strong>${esc(a.name)}</strong>${a.role ? `<span class="text-xs text-nx-gray-dark"> · ${esc(a.role)}</span>` : ""}
+                ${isExtra ? `<span class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">Extra</span>` : ""}
+              </span>
+              ${isExtra ? `<button data-del-present-extra="${extraIdx}" class="text-xs text-red-500 hover:text-red-700">×</button>` : ""}
+            </li>`;
+          }).join("");
+    }
+    function renderAbsent() {
+      const all = computeAttendeesAbsent();
+      document.getElementById("absent-count").textContent = all.length;
+      const el = document.getElementById("absent-list");
+      el.innerHTML = all.length === 0
+        ? `<li class="text-xs italic text-nx-gray-dark">Nessuno.</li>`
+        : all.map((a, i) => {
+            const fromPoolCount = state.pool.filter((p) => !p.isPresent).length;
+            const isExtra = i >= fromPoolCount;
+            const extraIdx = isExtra ? i - fromPoolCount : -1;
+            return `<li class="flex items-center justify-between gap-2 rounded border border-nx-gray-light/20 px-3 py-1.5 text-sm">
+              <span>
+                <strong>${esc(a.name)}</strong>${a.role ? `<span class="text-xs text-nx-gray-dark"> · ${esc(a.role)}</span>` : ""}
+                ${a.justified ? `<span class="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">Giustificato</span>` : ""}
+                ${isExtra ? `<span class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">Extra</span>` : ""}
+              </span>
+              ${isExtra ? `<button data-del-absent-extra="${extraIdx}" class="text-xs text-red-500 hover:text-red-700">×</button>` : ""}
+            </li>`;
+          }).join("");
+    }
+
+    // === Aggiunta extras ===
+    document.getElementById("add-present-btn").addEventListener("click", () => {
+      const name = document.getElementById("add-present-name").value.trim();
+      const role = document.getElementById("add-present-role").value.trim() || undefined;
+      if (!name) return;
+      state.extraPresent.push({ name, role });
+      document.getElementById("add-present-name").value = "";
+      document.getElementById("add-present-role").value = "";
+      renderPresent();
+    });
+    document.getElementById("present-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delPresentExtra;
+      if (i == null) return;
+      state.extraPresent.splice(Number(i), 1);
+      renderPresent();
+    });
+    document.getElementById("add-absent-btn").addEventListener("click", () => {
+      const name = document.getElementById("add-absent-name").value.trim();
+      const justified = document.getElementById("add-absent-justified").checked;
+      if (!name) return;
+      state.extraAbsent.push({ name, justified });
+      document.getElementById("add-absent-name").value = "";
+      document.getElementById("add-absent-justified").checked = false;
+      renderAbsent();
+    });
+    document.getElementById("absent-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delAbsentExtra;
+      if (i == null) return;
+      state.extraAbsent.splice(Number(i), 1);
+      renderAbsent();
+    });
+
+    // === Agenda ===
+    function renderAgenda() {
+      const el = document.getElementById("agenda-list");
+      el.innerHTML = state.agendaItems.map((it, i) => `
+        <li class="rounded-lg border border-nx-gray-light/30 bg-nx-off-white p-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Punto ${i + 1}</p>
+            <button data-del-agenda="${i}" class="text-xs text-red-500 hover:text-red-700">Rimuovi</button>
+          </div>
+          <input data-agenda-title="${i}" placeholder="Titolo (es. Approvazione bilancio)" value="${esc(it.title)}"
+            class="mt-2 w-full rounded-md border border-nx-gray-light/40 bg-white px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+          <textarea data-agenda-discussion="${i}" placeholder="Discussione (opzionale)" rows="2"
+            class="mt-2 w-full rounded-md border border-nx-gray-light/40 bg-white px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">${esc(it.discussion ?? "")}</textarea>
+          <textarea data-agenda-decision="${i}" placeholder="Decisione presa (opzionale)" rows="2"
+            class="mt-2 w-full rounded-md border border-nx-gray-light/40 bg-white px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">${esc(it.decision ?? "")}</textarea>
+        </li>`).join("");
+    }
+    document.getElementById("add-agenda-btn").addEventListener("click", () => {
+      state.agendaItems.push({ title: "", discussion: "", decision: "" });
+      renderAgenda();
+    });
+    document.getElementById("agenda-list").addEventListener("input", (e) => {
+      const t = e.target;
+      if (t.dataset.agendaTitle != null) state.agendaItems[Number(t.dataset.agendaTitle)].title = t.value;
+      if (t.dataset.agendaDiscussion != null) state.agendaItems[Number(t.dataset.agendaDiscussion)].discussion = t.value;
+      if (t.dataset.agendaDecision != null) state.agendaItems[Number(t.dataset.agendaDecision)].decision = t.value;
+    });
+    document.getElementById("agenda-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delAgenda;
+      if (i == null) return;
+      state.agendaItems.splice(Number(i), 1);
+      renderAgenda();
+    });
+
+    // === Signers ===
+    function renderSigners() {
+      const el = document.getElementById("signers-list");
+      el.innerHTML = state.signers.map((s, i) => `
+        <li class="flex items-center justify-between gap-2 rounded border border-nx-gray-light/20 px-3 py-1.5 text-sm">
+          <span><strong>${esc(s.name)}</strong> <span class="text-xs text-nx-gray-dark">— ${esc(s.email)}</span></span>
+          <button data-del-signer="${i}" class="text-xs text-red-500 hover:text-red-700">×</button>
+        </li>`).join("");
+    }
+    document.getElementById("add-signer-btn").addEventListener("click", () => {
+      const name = document.getElementById("add-signer-name").value.trim();
+      const email = document.getElementById("add-signer-email").value.trim();
+      if (!name || !email) return;
+      state.signers.push({ name, email });
+      document.getElementById("add-signer-name").value = "";
+      document.getElementById("add-signer-email").value = "";
+      renderSigners();
+    });
+    document.getElementById("signers-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delSigner;
+      if (i == null) return;
+      state.signers.splice(Number(i), 1);
+      renderSigners();
+    });
+
+    // === Toggle Strutturato / Markdown ===
+    const modeBtnS = document.getElementById("agenda-mode-structured");
+    const modeBtnM = document.getElementById("agenda-mode-markdown");
+    const structuredEl = document.getElementById("agenda-structured");
+    const markdownEl = document.getElementById("agenda-markdown-wrap");
+    const markdownTa = document.getElementById("agenda-markdown");
+    const agendaHint = document.getElementById("agenda-hint");
+
+    /** Genera markdown da agendaItems strutturati (per inizializzazione textarea). */
+    function structuredToMarkdown(items) {
+      return items.map((it, i) => {
+        const lines = [`### ${i + 1}. ${it.title || "Senza titolo"}`];
+        if (it.discussion) lines.push("", it.discussion);
+        if (it.decision) lines.push("", `**Decisione:** ${it.decision}`);
+        return lines.join("\n");
+      }).join("\n\n");
+    }
+
+    function setBtnActive(btn, isActive) {
+      // Toggle solo delle classi che cambiano (bg/text), niente reflow layout.
+      btn.classList.toggle("bg-nx-cyan", isActive);
+      btn.classList.toggle("text-white", isActive);
+      btn.classList.toggle("text-nx-dark", !isActive);
+      btn.classList.toggle("hover:bg-nx-off-white", !isActive);
+    }
+    function applyAgendaMode() {
+      const isMd = state.agendaMode === "markdown";
+      setBtnActive(modeBtnS, !isMd);
+      setBtnActive(modeBtnM, isMd);
+      structuredEl.classList.toggle("hidden", isMd);
+      markdownEl.classList.toggle("hidden", !isMd);
+      agendaHint.textContent = isMd
+        ? "Scrivi l'ordine del giorno direttamente in markdown."
+        : "Aggiungi un punto per ogni argomento trattato. Discussione e decisione sono opzionali.";
+    }
+    modeBtnS.addEventListener("click", () => {
+      state.agendaMode = "structured";
+      applyAgendaMode();
+    });
+    modeBtnM.addEventListener("click", () => {
+      // Se la textarea è vuota e ci sono item strutturati validi, genera markdown iniziale
+      const validItems = state.agendaItems.filter((it) => (it.title || "").trim() !== "");
+      if (!markdownTa.value.trim() && validItems.length > 0) {
+        markdownTa.value = structuredToMarkdown(validItems);
+        state.agendaMarkdown = markdownTa.value;
+      }
+      state.agendaMode = "markdown";
+      applyAgendaMode();
+    });
+    markdownTa.addEventListener("input", () => { state.agendaMarkdown = markdownTa.value; });
+
+    // === Auto-title ===
+    const typeLabels = {
+      assemblea_ordinaria: "Verbale Assemblea Ordinaria",
+      assemblea_straordinaria: "Verbale Assemblea Straordinaria",
+      consiglio_direttivo: "Verbale Consiglio Direttivo",
+      riunione_operativa: "Verbale Riunione operativa",
+    };
+    function updateTitle() {
+      const title = document.getElementById("f-title");
+      if (title.dataset.userEdited === "1") return;
+      const t = document.getElementById("f-type").value;
+      const d = document.getElementById("f-date").value;
+      if (t && typeLabels[t]) {
+        const dateLabel = d ? new Date(d).toLocaleDateString("it-IT") : "";
+        title.value = `${typeLabels[t]}${dateLabel ? " " + dateLabel : ""}`;
+      }
+    }
+    document.getElementById("f-type").addEventListener("change", updateTitle);
+    document.getElementById("f-date").addEventListener("change", updateTitle);
+    document.getElementById("f-title").addEventListener("input", function() { this.dataset.userEdited = "1"; });
+
+    // === Submit ===
+    document.getElementById("verbale-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("form-err");
+      errEl.classList.add("hidden");
+      const fd = new FormData(e.target);
+      const payload = {
+        type: String(fd.get("type") || ""),
+        title: String(fd.get("title") || "").trim(),
+        meetingDate: String(fd.get("meetingDate") || ""),
+        meetingTime: String(fd.get("meetingTime") || "") || null,
+        meetingEndTime: String(fd.get("meetingEndTime") || "") || null,
+        location: String(fd.get("location") || "").trim() || null,
+        presidentName: String(fd.get("presidentName") || "").trim() || null,
+        secretaryName: String(fd.get("secretaryName") || "").trim() || null,
+        attendeesPresent: computeAttendeesPresent(),
+        attendeesAbsent: computeAttendeesAbsent(),
+        agendaItems: state.agendaMode === "structured"
+          ? state.agendaItems.filter((it) => (it.title || "").trim() !== "")
+          : [],
+        agendaMarkdown: state.agendaMode === "markdown"
+          ? (state.agendaMarkdown.trim() || null)
+          : null,
+        bodyExtra: String(fd.get("bodyExtra") || "").trim() || null,
+        signers: state.signers,
+      };
+      try {
+        const r = await fetch("/api/verbali", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        window.location.href = `/area-soci/verbali/${j.verbale.id}`;
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove("hidden");
+      }
+    });
+
+    renderPool();
+    renderPresent();
+    renderAbsent();
+    renderAgenda();
+    renderSigners();
+
+    // Pre-compila ora inizio (ora corrente locale) + ora fine (+30 min).
+    // Sincronizza la fine se l'utente cambia l'inizio E non ha ancora editato
+    // manualmente la fine.
+    (function () {
+      const tStart = document.getElementById("f-time");
+      const tEnd = document.getElementById("f-end-time");
+      if (!tStart) return;
+
+      function addMinutes(hhmm, mins) {
+        const [h, m] = hhmm.split(":").map(Number);
+        if (isNaN(h) || isNaN(m)) return "";
+        const total = h * 60 + m + mins;
+        // wrap a 24h
+        const norm = ((total % 1440) + 1440) % 1440;
+        const nh = Math.floor(norm / 60);
+        const nm = norm % 60;
+        return `${String(nh).padStart(2,"0")}:${String(nm).padStart(2,"0")}`;
+      }
+
+      if (!tStart.value) {
+        const now = new Date();
+        tStart.value = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+      }
+      if (tEnd && !tEnd.value) {
+        tEnd.value = addMinutes(tStart.value, 30);
+      }
+      // Se l'utente cambia start, riallinea end (solo se end non è stato toccato manualmente)
+      tStart.addEventListener("change", () => {
+        if (tEnd && tEnd.dataset.userEdited !== "1" && tStart.value) {
+          tEnd.value = addMinutes(tStart.value, 30);
+        }
+      });
+      if (tEnd) {
+        tEnd.addEventListener("input", () => { tEnd.dataset.userEdited = "1"; });
+      }
+    })();
+  </script>
+</AreaSociLayout>

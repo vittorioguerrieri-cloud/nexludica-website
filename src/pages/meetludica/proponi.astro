@@ -1,0 +1,116 @@
+---
+/**
+ * Pagina autonoma per proporre un talk a MeetLudica.
+ * Era una finestra modale dentro /meetludica: averne un indirizzo proprio
+ * permette di linkarla dalle mail, dai social e dagli inviti diretti.
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+export const prerender = false;
+---
+
+<BaseLayout
+  title="Proponi un talk a MeetLudica — NexLudica APS"
+  description="Presenta la tua ricerca sul gioco da tavolo a MeetLudica, l'incontro mensile online di chi fa ricerca ludica. Trenta minuti di presentazione e un'ora di confronto."
+>
+  <section class="mx-auto max-w-2xl px-4 pb-24 pt-28 lg:pt-32">
+    <a href="/meetludica" class="text-sm font-semibold text-nx-cyan no-underline hover:underline">
+      ← MeetLudica
+    </a>
+
+    <h1 class="mt-4 text-4xl font-black leading-tight tracking-tight text-nx-dark sm:text-5xl" style="font-family: var(--font-display);">
+      Proponi un talk
+    </h1>
+    <p class="mt-5 text-lg leading-relaxed text-nx-gray-dark">
+      MeetLudica si tiene ogni ultimo giovedì del mese alle 20:00, online. Ogni serata
+      ospita <strong class="text-nx-dark">trenta minuti di presentazione</strong> di un
+      progetto di ricerca in corso, seguiti da un'ora di confronto con chi partecipa.
+    </p>
+    <p class="mt-3 text-base text-nx-gray-dark">
+      Non serve avere risultati definitivi: i lavori in corso sono i più interessanti da
+      discutere. Raccontaci cosa vorresti presentare e ti risponderemo entro qualche giorno.
+    </p>
+
+    <form id="propose-form" class="mt-10 space-y-4 rounded-xl border border-nx-gray-light/30 bg-white p-6 shadow-sm">
+      <input type="text" name="company" tabindex="-1" autocomplete="off" style="position:absolute; left:-9999px; opacity:0; pointer-events:none;" />
+      <div>
+        <label class="block text-sm font-medium text-nx-dark">Nome e cognome <span class="text-red-500">*</span></label>
+        <input name="name" required maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-nx-dark">Email <span class="text-red-500">*</span></label>
+        <input type="email" name="email" required maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-nx-dark">Titolo del talk <span class="font-normal text-nx-gray-dark">(opzionale)</span></label>
+        <input name="talkTitle" maxlength="300" placeholder="Un titolo provvisorio va benissimo" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-nx-dark">Abstract <span class="text-red-500">*</span></label>
+        <textarea name="abstract" required rows="8" maxlength="4000" minlength="30" placeholder="Cosa vorresti presentare? Metodo, risultati attesi, perché potrebbe interessare alla community ludica." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+        <p class="mt-1 text-xs text-nx-gray-dark">Minimo 30 caratteri.</p>
+      </div>
+      <p class="text-xs leading-relaxed text-nx-gray-dark">
+        Usiamo nome, email e proposta solo per valutare il talk e risponderti. Se il talk
+        viene accettato, nome e titolo compaiono nel calendario e nelle comunicazioni di
+        MeetLudica. Titolare è NexLudica APS: dettagli
+        nell'<a href="/privacy-policy" target="_blank" class="underline">informativa privacy</a>.
+      </p>
+      <div class="flex flex-wrap items-center gap-3 pt-2">
+        <button type="submit" id="propose-submit" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50">
+          Invia proposta
+        </button>
+        <span id="propose-status" class="text-sm"></span>
+      </div>
+    </form>
+
+    <div id="propose-done" class="mt-10 hidden rounded-xl border border-emerald-200 bg-emerald-50 p-6">
+      <p class="text-lg font-bold text-emerald-800">Proposta inviata</p>
+      <p class="mt-2 text-sm text-emerald-900">
+        Grazie: la leggiamo e ti rispondiamo via email entro qualche giorno.
+      </p>
+      <a href="/meetludica" class="mt-4 inline-block text-sm font-semibold text-nx-cyan no-underline hover:underline">
+        ← Torna a MeetLudica
+      </a>
+    </div>
+  </section>
+</BaseLayout>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("propose-form");
+    const statusEl = document.getElementById("propose-status");
+    const submitBtn = document.getElementById("propose-submit");
+    const done = document.getElementById("propose-done");
+    if (!form) return;
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      statusEl.textContent = "Invio in corso…";
+      statusEl.className = "text-sm text-nx-gray-dark";
+      const body = Object.fromEntries(new FormData(form).entries());
+      try {
+        const res = await fetch("/api/meetludica/propose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          statusEl.textContent = "✗ " + (data.error || res.status);
+          statusEl.className = "text-sm text-red-600";
+          submitBtn.disabled = false;
+          return;
+        }
+        form.classList.add("hidden");
+        done.classList.remove("hidden");
+        done.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch (err) {
+        statusEl.textContent = "Errore di rete, riprova.";
+        statusEl.className = "text-sm text-red-600";
+        submitBtn.disabled = false;
+      }
+    });
+  })();
+</script>

@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { getDb, getEnv } from "../../server/db";
 import { loadUserFromContext } from "../../server/auth";
-import { getMyProfile, upsertProfile } from "../../server/profiles";
+import { getMyProfile, upsertProfile, setEmailNexludica } from "../../server/profiles";
 
 export const prerender = false;
 
@@ -31,6 +31,23 @@ export const PUT: APIRoute = async (ctx) => {
     body = Object.fromEntries(fd.entries());
   }
 
+  // customFields: il client lo manda come array o come stringa JSON (form)
+  let customFields: unknown = undefined;
+  if (body.customFields !== undefined) {
+    if (typeof body.customFields === "string") {
+      try { customFields = JSON.parse(body.customFields); } catch { customFields = undefined; }
+    } else {
+      customFields = body.customFields;
+    }
+  }
+
+  // Email ufficiale @nexludica.org (opzionale). Se presente nel body la aggiorna.
+  if (body.emailNexludica !== undefined || body.email_nexludica !== undefined) {
+    const raw = body.emailNexludica ?? body.email_nexludica;
+    const res = await setEmailNexludica(db, user.id, raw == null ? null : String(raw));
+    if (!res.ok) return json({ ok: false, error: res.error }, 400);
+  }
+
   await upsertProfile(db, user.id, {
     displayName: optStr(body.displayName ?? body.display_name),
     roleLabel: optStr(body.roleLabel ?? body.role_label),
@@ -41,6 +58,9 @@ export const PUT: APIRoute = async (ctx) => {
     instagram: optStr(body.instagram),
     publicVisible: optBool(body.publicVisible ?? body.public_visible),
     emailPublic: optBool(body.emailPublic ?? body.email_public),
+    cvAcademic: optStr(body.cvAcademic ?? body.cv_academic),
+    cvOther: optStr(body.cvOther ?? body.cv_other),
+    customFields,
   });
   const profile = await getMyProfile(db, user.id);
   return json({ ok: true, profile });

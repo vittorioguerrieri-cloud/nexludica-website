@@ -1,0 +1,131 @@
+---
+/**
+ * Form per creare un nuovo gioco. Soci loggati.
+ */
+import PlaytestLayout from "../../../layouts/PlaytestLayout.astro";
+import { getUser } from "../../../server/guards";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) {
+  const nextUrl = encodeURIComponent(new URL(Astro.request.url).toString());
+  return Astro.redirect(`https://nexludica.org/login?next=${nextUrl}`);
+}
+---
+
+<PlaytestLayout
+  title="Nuovo gioco — Playtest"
+  crumbs={[{ label: "Nuovo gioco" }]}
+>
+  <section class="mx-auto max-w-2xl">
+    <h1 class="text-3xl font-black tracking-tight text-nx-dark" style="font-family: var(--font-display);">
+      Crea un nuovo gioco
+    </h1>
+    <p class="mt-2 text-sm text-nx-gray-dark">
+      Il nome e una descrizione breve sono sufficienti per iniziare. Tutto il resto lo puoi configurare dopo nella scheda del gioco.
+    </p>
+
+    <form id="game-form" class="mt-8 space-y-5 rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="name">Nome del gioco *</label>
+        <input id="name" name="name" type="text" required maxlength="80"
+          placeholder="es. WarFables, A Monk-y Business"
+          class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="shortDescription">Descrizione breve</label>
+        <input id="shortDescription" name="shortDescription" type="text" maxlength="200"
+          placeholder="Una riga che descrive il gioco"
+          class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="designers">Game designer</label>
+        <input id="designers" name="designers" type="text" maxlength="200"
+          placeholder="es. V. Guerrieri, D. Aurelio, L. Caloi"
+          class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="playersMin">Giocatori (min)</label>
+          <input id="playersMin" name="playersMin" type="number" min="1" max="20"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="playersMax">Giocatori (max)</label>
+          <input id="playersMax" name="playersMax" type="number" min="1" max="20"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="durationMinMinutes">Durata (min, minuti)</label>
+          <input id="durationMinMinutes" name="durationMinMinutes" type="number" min="1" max="600"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="durationMaxMinutes">Durata (max, minuti)</label>
+          <input id="durationMaxMinutes" name="durationMaxMinutes" type="number" min="1" max="600"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="minAge">Età minima</label>
+        <input id="minAge" name="minAge" type="number" min="3" max="99"
+          class="mt-1 w-32 rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+      </div>
+
+      <div class="flex items-center justify-between border-t border-nx-gray-light/20 pt-5">
+        <a href="/" class="text-sm font-semibold text-nx-gray-dark no-underline hover:text-nx-cyan">← Annulla</a>
+        <button type="submit"
+          class="rounded-md bg-nx-cyan px-5 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50">
+          Crea gioco
+        </button>
+      </div>
+
+      <p id="err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+    </form>
+  </section>
+
+  <script is:inline>
+    const form = document.getElementById("game-form");
+    const err = document.getElementById("err");
+    form?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.classList.add("hidden");
+      const data = Object.fromEntries(new FormData(form).entries());
+      const payload = {
+        name: String(data.name || "").trim(),
+        shortDescription: String(data.shortDescription || "").trim() || null,
+        designers: String(data.designers || "").trim() || null,
+        playersMin: data.playersMin ? Number(data.playersMin) : null,
+        playersMax: data.playersMax ? Number(data.playersMax) : null,
+        durationMinMinutes: data.durationMinMinutes ? Number(data.durationMinMinutes) : null,
+        durationMaxMinutes: data.durationMaxMinutes ? Number(data.durationMaxMinutes) : null,
+        minAge: data.minAge ? Number(data.minAge) : null,
+      };
+      if (!payload.name) { err.textContent = "Il nome è obbligatorio."; err.classList.remove("hidden"); return; }
+      const btn = form.querySelector("button[type=submit]");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/playtest/games", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) { throw new Error(j.error || "Errore"); }
+        window.location.href = `/giochi/${j.game.slug}`;
+      } catch (e) {
+        err.textContent = e.message || "Errore";
+        err.classList.remove("hidden");
+        btn.disabled = false;
+      }
+    });
+  </script>
+</PlaytestLayout>

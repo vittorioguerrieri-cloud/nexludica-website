@@ -1,4 +1,8 @@
 ---
+// Montserrat servito dal nostro dominio e non da Google Fonts: caricarlo da
+// Google trasmette l'IP di ogni visitatore senza consenso (LG Muenchen,
+// 20/1/2022). Il font variabile copre tutti i pesi usati, da 400 a 900.
+import "@fontsource-variable/montserrat";
 import "../styles/global.css";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
@@ -6,11 +10,14 @@ import Footer from "../components/Footer.astro";
 interface Props {
   title?: string;
   description?: string;
+  /** Se true, blocca indicizzazione (area riservata, pagine con token, etc.). */
+  noindex?: boolean;
 }
 
 const {
   title = "NexLudica APS",
-  description = "Associazione di promozione sociale per la cultura ludica e l'inclusione attraverso il gioco.",
+  description = "Associazione di promozione sociale per la cultura ludica e l'equità attraverso il gioco. Femminismo, diritti queer e non binari, antidiscriminazione.",
+  noindex = false,
 } = Astro.props;
 ---
 
@@ -21,18 +28,29 @@ const {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <link rel="icon" type="image/svg+xml" href="/images/branding/logo-square.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+
+    {/* Open Graph / Twitter card — usa il logo "Game | Research | Equity" */}
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={Astro.url.href} />
+    <meta property="og:image" content="https://nexludica.org/images/branding/logo-equity-og.png" />
+    <meta property="og:image:width" content="980" />
+    <meta property="og:image:height" content="420" />
+    <meta property="og:site_name" content="NexLudica APS" />
+    <meta property="og:locale" content="it_IT" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="https://nexludica.org/images/branding/logo-equity-og.png" />
   </head>
   <body>
+    <a href="#contenuto" class="salta-al-contenuto">Salta al contenuto</a>
     <Header />
-    <main>
+    <main id="contenuto">
       <slot />
     </main>
     <Footer />

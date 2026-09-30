@@ -4,6 +4,7 @@
 import type { APIRoute } from "astro";
 import { getDb, getEnv } from "../../../server/db";
 import { createSession, loginWithPassword, setSessionCookie } from "../../../server/auth";
+import { checkAndRecordAttempt } from "../../../server/rate-limit";
 
 export const prerender = false;
 
@@ -11,6 +12,12 @@ export const POST: APIRoute = async (ctx) => {
   const env = (await getEnv()) as Env;
   const db = getDb(env);
   if (!db) return json({ ok: false, error: "backend" }, 503);
+
+  // Rate limit: max 10 tentativi/ora per IP, contro brute force.
+  const rl = await checkAndRecordAttempt(db, ctx.request, "login", { max: 10 });
+  if (!rl.ok) {
+    return json({ ok: false, error: "Troppi tentativi di login. Riprova fra un'ora." }, 429);
+  }
 
   let email = "", password = "";
   try {
@@ -29,7 +36,7 @@ export const POST: APIRoute = async (ctx) => {
   const sid = await createSession(db, userId, ctx.request.headers.get("User-Agent"));
   const headers = new Headers({ "Content-Type": "application/json" });
   const isHttps = ctx.url.protocol === "https:";
-  setSessionCookie(headers, sid, isHttps);
+  setSessionCookie(headers, sid, isHttps, ctx.url.hostname);
   return new Response(JSON.stringify({ ok: true, redirect: "/area-soci" }), {
     status: 200,
     headers,

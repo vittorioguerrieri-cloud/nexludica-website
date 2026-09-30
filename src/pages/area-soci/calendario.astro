@@ -1,0 +1,252 @@
+---
+/**
+ * Calendario bandi e conferenze (area soci, tutti i soci).
+ */
+import AreaSociLayout from "../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../server/db";
+import { getUser } from "../../server/guards";
+import { listOpportunities, type Opportunity } from "../../server/opportunities";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+const items: Opportunity[] = db ? await listOpportunities(db) : [];
+
+const todayIso = new Date().toISOString().slice(0, 10);
+const upcoming = items.filter((i) => !i.archived && (!i.eventDate || i.eventDate >= todayIso));
+const past = items.filter((i) => i.archived || (i.eventDate && i.eventDate < todayIso));
+
+function fmt(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso + "T00:00:00Z").toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+function daysTo(iso: string | null): number | null {
+  if (!iso) return null;
+  const ms = new Date(iso + "T00:00:00Z").getTime() - new Date(todayIso + "T00:00:00Z").getTime();
+  return Math.round(ms / 86400000);
+}
+function countdown(iso: string | null): { txt: string; cls: string } | null {
+  const d = daysTo(iso);
+  if (d == null) return null;
+  if (d < 0) return { txt: `scaduto ${-d} g fa`, cls: "text-nx-gray-dark" };
+  if (d === 0) return { txt: "oggi", cls: "text-red-600 font-bold" };
+  if (d <= 7) return { txt: `tra ${d} g`, cls: "text-red-600 font-semibold" };
+  if (d <= 30) return { txt: `tra ${d} g`, cls: "text-amber-700 font-semibold" };
+  return { txt: `tra ${d} g`, cls: "text-nx-gray-dark" };
+}
+const kindBadge = (k: string) => k === "bando"
+  ? { label: "Bando", cls: "bg-nx-cyan-light text-nx-cyan" }
+  : k === "evento"
+  ? { label: "Evento", cls: "bg-violet-100 text-violet-800" }
+  : { label: "Conferenza", cls: "bg-amber-100 text-amber-800" };
+
+// map per il modal di modifica
+const editMap = Object.fromEntries(items.map((i) => [i.id, {
+  kind: i.kind, title: i.title, organization: i.organization, eventDate: i.eventDate, endDate: i.endDate,
+  url: i.url, location: i.location, amount: i.amount, notes: i.notes,
+}]));
+---
+
+<AreaSociLayout title="Bandi e conferenze — Area Soci" active="calendario">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Bandi, conferenze ed eventi</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">Calendario condiviso di scadenze bandi, conferenze ed eventi. Tuttɜ lɜ socɜ possono consultare, aggiungere e modificare.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" data-add="bando" class="rounded-lg bg-nx-cyan px-4 py-2 text-sm font-bold uppercase tracking-wider text-white shadow hover:-translate-y-0.5 transition">+ Bando</button>
+      <button type="button" data-add="conferenza" class="rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold uppercase tracking-wider text-white shadow hover:-translate-y-0.5 transition">+ Conferenza</button>
+      <button type="button" data-add="evento" class="rounded-lg bg-violet-700 px-4 py-2 text-sm font-bold uppercase tracking-wider text-white shadow hover:-translate-y-0.5 transition">+ Evento</button>
+    </div>
+  </div>
+
+  <div class="mt-6 flex flex-wrap items-center gap-2 text-xs">
+    <span class="font-semibold uppercase tracking-wider text-nx-gray-dark">Filtra:</span>
+    <button type="button" data-filter="all" class="nx-filt rounded-full bg-nx-cyan px-3 py-1 font-semibold text-white">Tutti</button>
+    <button type="button" data-filter="bando" class="nx-filt rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Bandi</button>
+    <button type="button" data-filter="conferenza" class="nx-filt rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Conferenze</button>
+    <button type="button" data-filter="evento" class="nx-filt rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Eventi</button>
+  </div>
+
+  <h3 class="mt-6 text-base font-bold text-nx-dark">Prossimi ({upcoming.length})</h3>
+  {upcoming.length === 0 ? (
+    <p class="mt-3 rounded-lg border-2 border-dashed border-nx-gray-light/40 bg-white p-6 text-center text-sm text-nx-gray-dark">Nessuna scadenza o conferenza in programma. Aggiungine una!</p>
+  ) : (
+    <ul class="mt-3 space-y-2">
+      {upcoming.map((i) => {
+        const kb = kindBadge(i.kind); const cd = countdown(i.eventDate);
+        return (
+          <li class="rounded-lg border border-nx-gray-light/20 bg-white p-4" data-opp-row data-opp-id={i.id} data-kind={i.kind}>
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${kb.cls}`}>{kb.label}</span>
+                  <p class="font-bold text-nx-dark">{i.url ? <a href={i.url} target="_blank" rel="noopener noreferrer" class="no-underline hover:text-nx-cyan hover:underline">{i.title}</a> : i.title}</p>
+                </div>
+                <p class="mt-1 text-xs text-nx-gray-dark">
+                  {i.organization && <span>{i.organization} · </span>}
+                  <span>{i.kind === "bando" ? "Scadenza" : "Data"}: {fmt(i.eventDate)}{i.endDate ? ` – ${fmt(i.endDate)}` : ""}</span>
+                  {i.location && <span> · {i.location}</span>}
+                  {i.amount && <span> · {i.amount}</span>}
+                </p>
+                {i.notes && <p class="mt-1 whitespace-pre-line text-xs text-nx-gray-dark">{i.notes}</p>}
+              </div>
+              <div class="flex shrink-0 flex-col items-end gap-1 text-xs">
+                {cd && <span class={cd.cls}>{cd.txt}</span>}
+                <div class="flex gap-2">
+                  <button type="button" data-opp-edit={i.id} class="text-nx-blue hover:underline">Modifica</button>
+                  <button type="button" data-opp-archive={i.id} class="text-nx-gray-dark hover:underline">Archivia</button>
+                  <button type="button" data-opp-delete={i.id} class="text-red-600 hover:underline">Elimina</button>
+                </div>
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  )}
+
+  {past.length > 0 && (
+    <details class="mt-8">
+      <summary class="cursor-pointer text-base font-bold text-nx-dark">Passati / archiviati ({past.length})</summary>
+      <ul class="mt-3 space-y-2">
+        {past.map((i) => {
+          const kb = kindBadge(i.kind);
+          return (
+            <li class="rounded-lg border border-nx-gray-light/20 bg-nx-off-white p-3 opacity-80" data-opp-row data-opp-id={i.id} data-kind={i.kind}>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <span class={`mr-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${kb.cls}`}>{kb.label}</span>
+                  <span class="text-sm font-semibold text-nx-dark">{i.title}</span>
+                  <span class="ml-2 text-xs text-nx-gray-dark">{fmt(i.eventDate)}{i.organization ? ` · ${i.organization}` : ""}</span>
+                </div>
+                <div class="flex gap-2 text-xs">
+                  {i.url && <a href={i.url} target="_blank" rel="noopener noreferrer" class="text-nx-blue no-underline hover:underline">Link</a>}
+                  {i.archived && <button type="button" data-opp-unarchive={i.id} class="text-nx-cyan hover:underline">Riattiva</button>}
+                  <button type="button" data-opp-edit={i.id} class="text-nx-blue hover:underline">Modifica</button>
+                  <button type="button" data-opp-delete={i.id} class="text-red-600 hover:underline">Elimina</button>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  )}
+
+  <!-- MODAL aggiungi/modifica -->
+  <div id="opp-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-lg rounded-xl bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-nx-gray-light/20 px-5 py-3">
+        <h3 id="opp-modal-title" class="text-base font-bold text-nx-dark">Aggiungi</h3>
+        <button type="button" id="opp-close" class="text-nx-gray-dark hover:text-nx-dark">✕</button>
+      </div>
+      <form id="opp-form" class="grid gap-3 px-5 py-4 sm:grid-cols-2">
+        <input type="hidden" id="o-id" />
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Tipo</span>
+          <select id="o-kind" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
+            <option value="bando">Bando</option>
+            <option value="conferenza">Conferenza</option>
+            <option value="evento">Evento</option>
+          </select>
+        </label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark"><span id="o-date-label">Scadenza</span></span><input id="o-date" type="date" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Titolo</span><input id="o-title" required maxlength="250" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Ente / organizzatore</span><input id="o-org" maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm" id="o-end-wrap"><span class="font-medium text-nx-dark">Data fine (opz.)</span><input id="o-end" type="date" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Link</span><input id="o-url" type="url" maxlength="500" placeholder="https://" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm" id="o-loc-wrap"><span class="font-medium text-nx-dark">Luogo</span><input id="o-loc" maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm" id="o-amount-wrap"><span class="font-medium text-nx-dark">Importo / budget</span><input id="o-amount" maxlength="100" placeholder="es. fino a 10.000 €" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Note</span><textarea id="o-notes" rows="3" maxlength="2000" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm"></textarea></label>
+        <div class="sm:col-span-2 flex items-center justify-end gap-3">
+          <span id="o-status" class="mr-auto text-xs"></span>
+          <button type="button" id="o-cancel" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:bg-nx-off-white">Annulla</button>
+          <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ editMap }}>window.__oppEdit = editMap;</script>
+<script is:inline>
+  (function () {
+    const M = window.__oppEdit || {};
+    const modal = document.getElementById("opp-modal");
+    const g = (id) => document.getElementById(id);
+    function applyKindUi() {
+      const k = g("o-kind").value;
+      g("o-date-label").textContent = k === "bando" ? "Scadenza" : "Data";
+      const dated = k === "conferenza" || k === "evento";
+      g("o-loc-wrap").style.display = dated ? "" : "none";
+      g("o-end-wrap").style.display = dated ? "" : "none";
+      g("o-amount-wrap").style.display = k === "bando" ? "" : "none";
+    }
+    g("o-kind").addEventListener("change", applyKindUi);
+    function open(kind, data) {
+      g("o-id").value = data ? data.__id : "";
+      g("o-kind").value = (data && data.kind) || kind || "bando";
+      g("o-title").value = data?.title || ""; g("o-org").value = data?.organization || "";
+      g("o-date").value = data?.eventDate || ""; g("o-end").value = data?.endDate || "";
+      g("o-url").value = data?.url || ""; g("o-loc").value = data?.location || "";
+      g("o-amount").value = data?.amount || ""; g("o-notes").value = data?.notes || "";
+      g("opp-modal-title").textContent = data ? "Modifica" : ("Aggiungi " + (kind || "bando"));
+      g("o-status").textContent = "";
+      applyKindUi();
+      modal.classList.remove("hidden"); modal.classList.add("flex");
+    }
+    function close() { modal.classList.add("hidden"); modal.classList.remove("flex"); }
+    g("opp-close").addEventListener("click", close);
+    g("o-cancel").addEventListener("click", close);
+    modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+    document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => open(b.getAttribute("data-add"), null)));
+    document.querySelectorAll("[data-opp-edit]").forEach((b) => b.addEventListener("click", () => {
+      const id = b.getAttribute("data-opp-edit"); const d = M[id]; if (d) open(null, { ...d, __id: id });
+    }));
+
+    g("opp-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = g("o-id").value;
+      const st = g("o-status");
+      const body = {
+        kind: g("o-kind").value, title: g("o-title").value.trim(), organization: g("o-org").value.trim() || null,
+        eventDate: g("o-date").value || null, endDate: g("o-end").value || null, url: g("o-url").value.trim() || null,
+        location: g("o-loc").value.trim() || null, amount: g("o-amount").value.trim() || null, notes: g("o-notes").value.trim() || null,
+      };
+      if (!body.title) { st.textContent = "Titolo obbligatorio"; st.className = "mr-auto text-xs text-red-600"; return; }
+      st.textContent = "Salvataggio…"; st.className = "mr-auto text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch(id ? "/api/opportunities/" + encodeURIComponent(id) : "/api/opportunities", {
+          method: id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { st.textContent = "✗ " + (d.error || res.status); st.className = "mr-auto text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { st.textContent = "Errore di rete"; st.className = "mr-auto text-xs text-red-600"; }
+    });
+
+    async function patch(id, fields) { const r = await fetch("/api/opportunities/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) }); return r.ok; }
+    document.querySelectorAll("[data-opp-archive]").forEach((b) => b.addEventListener("click", async () => { if (await patch(b.getAttribute("data-opp-archive"), { archived: true })) location.reload(); }));
+    document.querySelectorAll("[data-opp-unarchive]").forEach((b) => b.addEventListener("click", async () => { if (await patch(b.getAttribute("data-opp-unarchive"), { archived: false })) location.reload(); }));
+    document.querySelectorAll("[data-opp-delete]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Eliminare questa voce?")) return;
+      const id = b.getAttribute("data-opp-delete");
+      const r = await fetch("/api/opportunities/" + encodeURIComponent(id), { method: "DELETE" });
+      if (r.ok) { const row = document.querySelector(`[data-opp-row][data-opp-id="${id}"]`); if (row) row.remove(); }
+    }));
+
+    // Filtri
+    document.querySelectorAll(".nx-filt").forEach((b) => b.addEventListener("click", () => {
+      document.querySelectorAll(".nx-filt").forEach((x) => { x.classList.remove("bg-nx-cyan", "text-white"); x.classList.add("border", "border-nx-gray-light/40", "text-nx-gray-dark"); });
+      b.classList.add("bg-nx-cyan", "text-white"); b.classList.remove("border", "border-nx-gray-light/40", "text-nx-gray-dark");
+      const f = b.getAttribute("data-filter");
+      document.querySelectorAll("[data-opp-row]").forEach((row) => {
+        row.classList.toggle("hidden", f !== "all" && row.getAttribute("data-kind") !== f);
+      });
+    }));
+  })();
+</script>

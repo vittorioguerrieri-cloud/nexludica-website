@@ -13,7 +13,7 @@
 
 import type { APIContext } from "astro";
 import { getDb, getEnv, now, secureToken, uuid } from "./db";
-import type { UserRow } from "./db";
+import type { UserRow, UserRole } from "./db";
 import { hashPassword, verifyPassword } from "./password";
 
 const SESSION_COOKIE = "nx_session";
@@ -24,7 +24,7 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
-  role: "member" | "admin";
+  role: UserRole;
 }
 
 /**
@@ -115,18 +115,25 @@ export async function loadSessionUser(
   db: D1Database,
   sessionId: string,
 ): Promise<SessionUser | null> {
+  // I soci con membership_status='pending' o 'suspended' non possono
+  // accedere all'area soci finche' l'admin non li approva. Quelli 'former'
+  // sono ex-soci che possono continuare a loggarsi solo come collaborator
+  // (gestito a livello applicativo se serve).
   const row = await db
     .prepare(
       `SELECT u.id as id, u.email as email, u.name as name, u.role as role, s.expires_at as expires_at
-       FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.id = ? AND u.active = 1`,
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       LEFT JOIN member_data md ON md.user_id = u.id
+       WHERE s.id = ? AND u.active = 1
+         AND COALESCE(md.membership_status, 'active') NOT IN ('pending', 'suspended')`,
     )
     .bind(sessionId)
     .first<{
       id: string;
       email: string;
       name: string;
-      role: "member" | "admin";
+      role: UserRole;
       expires_at: number;
     }>();
   if (!row) return null;
@@ -143,9 +150,33 @@ export function getSessionCookieName(): string {
 }
 
 /**
- * Imposta il cookie di sessione sulla response.
+ * Determina il Domain del cookie a partire dall'host della request.
+ * Se siamo su un host di nexludica.org (root o subdomain), torniamo
+ * ".nexludica.org" cosi' il cookie e' valido cross-subdomain (utile per
+ * playtest.nexludica.org, research.nexludica.org, ecc.). Altrimenti
+ * torniamo null e il cookie resta host-scoped (utile in dev su localhost).
  */
-export function setSessionCookie(headers: Headers, sessionId: string, secure = true): void {
+function cookieDomainForHost(host: string | null | undefined): string | null {
+  if (!host) return null;
+  // Rimuovi eventuale porta
+  const h = host.split(":")[0].toLowerCase();
+  if (h === "nexludica.org" || h.endsWith(".nexludica.org")) {
+    return ".nexludica.org";
+  }
+  return null;
+}
+
+/**
+ * Imposta il cookie di sessione sulla response.
+ * `host` opzionale: se fornito, il cookie viene scoped a .nexludica.org
+ * cosi' funziona cross-subdomain (playtest, research, area-soci, ecc.).
+ */
+export function setSessionCookie(
+  headers: Headers,
+  sessionId: string,
+  secure = true,
+  host?: string | null,
+): void {
   const parts = [
     `${SESSION_COOKIE}=${sessionId}`,
     "Path=/",
@@ -153,11 +184,13 @@ export function setSessionCookie(headers: Headers, sessionId: string, secure = t
     "SameSite=Lax",
     `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
   ];
+  const domain = cookieDomainForHost(host);
+  if (domain) parts.push(`Domain=${domain}`);
   if (secure) parts.push("Secure");
   headers.append("Set-Cookie", parts.join("; "));
 }
 
-export function clearSessionCookie(headers: Headers, secure = true): void {
+export function clearSessionCookie(headers: Headers, secure = true, host?: string | null): void {
   const parts = [
     `${SESSION_COOKIE}=`,
     "Path=/",
@@ -165,6 +198,8 @@ export function clearSessionCookie(headers: Headers, secure = true): void {
     "SameSite=Lax",
     "Max-Age=0",
   ];
+  const domain = cookieDomainForHost(host);
+  if (domain) parts.push(`Domain=${domain}`);
   if (secure) parts.push("Secure");
   headers.append("Set-Cookie", parts.join("; "));
 }
@@ -207,8 +242,16 @@ export async function findUserByEmail(
   db: D1Database,
   email: string,
 ): Promise<UserRow | null> {
+  // Anche qui escludiamo pending/suspended cosi' che il magic link non
+  // venga inviato a un socio non-approvato (verrebbe inviato ma il login
+  // fallirebbe comunque, meglio bloccare prima).
   const row = await db
-    .prepare("SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND active = 1")
+    .prepare(
+      `SELECT u.* FROM users u
+       LEFT JOIN member_data md ON md.user_id = u.id
+       WHERE LOWER(u.email) = LOWER(?) AND u.active = 1
+         AND COALESCE(md.membership_status, 'active') NOT IN ('pending', 'suspended')`,
+    )
     .bind(email.trim())
     .first<UserRow>();
   return row ?? null;
@@ -250,9 +293,14 @@ export async function loginWithPassword(
   email: string,
   password: string,
 ): Promise<string | null> {
+  // Anche qui blocchiamo pending/suspended a livello di login.
   const row = await db
     .prepare(
-      "SELECT id, password_hash FROM users WHERE LOWER(email) = LOWER(?) AND active = 1",
+      `SELECT u.id as id, u.password_hash as password_hash
+       FROM users u
+       LEFT JOIN member_data md ON md.user_id = u.id
+       WHERE LOWER(u.email) = LOWER(?) AND u.active = 1
+         AND COALESCE(md.membership_status, 'active') NOT IN ('pending', 'suspended')`,
     )
     .bind(email.trim())
     .first<{ id: string; password_hash: string | null }>();
@@ -261,37 +309,7 @@ export async function loginWithPassword(
   return ok ? row.id : null;
 }
 
-/**
- * Crea un nuovo utente (usato dall'admin per aggiungere soci).
- */
-export async function createUser(
-  db: D1Database,
-  email: string,
-  name: string,
-  role: "member" | "admin" = "member",
-): Promise<UserRow> {
-  const id = uuid();
-  await db
-    .prepare(
-      "INSERT INTO users (id, email, name, role, active, created_at) VALUES (?, ?, ?, ?, 1, ?)",
-    )
-    .bind(id, email.toLowerCase().trim(), name.trim(), role, now())
-    .run();
-  // Crea profilo vuoto associato
-  await db
-    .prepare(
-      `INSERT INTO profiles (user_id, display_name, public_visible, sort_order, updated_at)
-       VALUES (?, ?, 1, 100, ?)`,
-    )
-    .bind(id, name.trim(), now())
-    .run();
-  return {
-    id,
-    email: email.toLowerCase().trim(),
-    name: name.trim(),
-    role,
-    active: 1,
-    created_at: now(),
-    last_login_at: null,
-  };
-}
+// NB: rimosso createUser() — non era piu' chiamato da nessuna parte
+// (sostituito da createMember in server/admin.ts che gestisce anche i
+// permessi Drive e i record member_data). Lasciarlo era pericoloso perche'
+// non creava il record member_data → utente "mezzo-creato".

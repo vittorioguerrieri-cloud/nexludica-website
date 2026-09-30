@@ -1,11 +1,17 @@
 ---
 import AreaSociLayout from "../../layouts/AreaSociLayout.astro";
-import { getEnv } from "../../server/db";
+import { getDb, getEnv } from "../../server/db";
 import { listFolders, type DriveFolder } from "../../server/drive";
+import { listVerbali, listTrashedVerbali, typeLabel, type Verbale } from "../../server/verbali";
+import { getUser } from "../../server/guards";
 
 export const prerender = false;
 
+const user = await getUser(Astro);
+const isAdmin = user?.role === "admin";
+
 const env = await getEnv();
+const db = getDb(env as Env);
 const rootId = (env as Env).DRIVE_ROOT_FOLDER_ID;
 let folders: DriveFolder[] = [];
 let driveError: string | null = null;
@@ -18,6 +24,26 @@ if (rootId) {
   }
 } else {
   driveError = "DRIVE_ROOT_FOLDER_ID non configurato";
+}
+
+let verbali: Verbale[] = [];
+let trashed: Array<Verbale & { deletedAt: number }> = [];
+if (db) {
+  try { verbali = await listVerbali(db); } catch (e) { console.error("[verbali] db list failed", e); }
+  if (isAdmin) {
+    try { trashed = await listTrashedVerbali(db); } catch (e) { console.error("[verbali] trash list failed", e); }
+  }
+}
+
+function statusBadge(s: Verbale["status"]): { label: string; cls: string } {
+  switch (s) {
+    case "draft": return { label: "Bozza", cls: "bg-nx-gray-light/40 text-nx-gray-dark" };
+    case "generated": return { label: "Generato", cls: "bg-sky-100 text-sky-700" };
+    case "sent_for_signature": return { label: "In firma", cls: "bg-amber-100 text-amber-700" };
+    case "signed": return { label: "Firmato", cls: "bg-emerald-100 text-emerald-700" };
+    case "archived": return { label: "Archiviato", cls: "bg-nx-gray-light/40 text-nx-gray-dark" };
+    case "voided": return { label: "Annullato", cls: "bg-red-100 text-red-700" };
+  }
 }
 
 // Icone tematiche per nomi cartella ricorrenti
@@ -34,12 +60,88 @@ function iconFor(name: string): string {
 ---
 
 <AreaSociLayout title="Verbali e documenti — Area Soci" active="verbali">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Verbali e documenti dell'associazione</h2>
+      <p class="mt-2 max-w-3xl text-sm text-nx-gray-dark">
+        Crea, firma elettronicamente e archivia i verbali. Le cartelle Drive sotto raccolgono
+        i documenti storici e quelli firmati.
+      </p>
+    </div>
+    {isAdmin && (
+      <a href="/area-soci/verbali/nuovo"
+        class="rounded-md bg-nx-cyan px-4 py-2.5 text-sm font-bold text-white no-underline shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+        + Nuovo verbale
+      </a>
+    )}
+  </div>
+
+  {/* === LISTA VERBALI DB === */}
+  <section class="mt-8">
+    <h3 class="text-base font-bold text-nx-dark">Verbali NexLudica</h3>
+    {verbali.length === 0 ? (
+      <div class="mt-4 rounded-lg border-2 border-dashed border-nx-gray-light/40 bg-white p-6 text-center text-sm text-nx-gray-dark">
+        Nessun verbale ancora.{isAdmin && " Crea il primo per iniziare."}
+      </div>
+    ) : (
+      <ul class="mt-4 space-y-2">
+        {verbali.map((v) => {
+          const b = statusBadge(v.status);
+          return (
+            <li class="flex items-stretch gap-2" data-verbale-row data-verbale-id={v.id}>
+              <a href={`/area-soci/verbali/${v.id}`} class="block flex-1 rounded-lg border border-nx-gray-light/20 bg-white p-4 no-underline transition hover:border-nx-cyan hover:shadow-md">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="font-bold text-nx-dark">{v.title}</p>
+                  <span class={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${b.cls}`}>{b.label}</span>
+                </div>
+                <dl class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-nx-gray-dark">
+                  <div><dt class="inline font-semibold">Tipo:</dt> <dd class="inline">{typeLabel(v.type)}</dd></div>
+                  <div><dt class="inline font-semibold">Data:</dt> <dd class="inline">{v.meetingDate}</dd></div>
+                  {v.location && <div><dt class="inline font-semibold">Luogo:</dt> <dd class="inline">{v.location}</dd></div>}
+                  <div><dt class="inline font-semibold">Firmatari:</dt> <dd class="inline">{v.signers.map(s => s.name).join(", ")}</dd></div>
+                </dl>
+              </a>
+              {isAdmin && (
+                <button type="button" data-trash-verbale={v.id} data-title={v.title}
+                  class="shrink-0 rounded-lg border border-nx-gray-light/40 px-3 text-xs font-semibold text-nx-gray-dark transition hover:border-red-300 hover:text-red-600"
+                  title="Sposta nel cestino">Cestina</button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    )}
+
+    {isAdmin && trashed.length > 0 && (
+      <details class="mt-6 rounded-lg border border-nx-gray-light/20 bg-nx-off-white">
+        <summary class="cursor-pointer px-4 py-3 text-sm font-bold text-nx-dark">
+          🗑 Cestino ({trashed.length})
+        </summary>
+        <div class="space-y-2 px-4 pb-4">
+          <p class="text-xs text-nx-gray-dark">I verbali nel cestino non compaiono nella lista. Puoi ripristinarli o eliminarli definitivamente (con firme, allegati e file su Drive).</p>
+          {trashed.map((v) => (
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-nx-gray-light/20 bg-white p-3" data-trash-row data-verbale-id={v.id}>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-nx-dark">{v.title}</p>
+                <p class="text-[11px] text-nx-gray-dark">{typeLabel(v.type)} · {v.meetingDate} · cestinato il {new Date(v.deletedAt).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" })}</p>
+              </div>
+              <div class="flex gap-2 text-xs">
+                <button type="button" data-restore-verbale={v.id} class="rounded border border-nx-cyan/40 px-3 py-1 font-semibold text-nx-cyan hover:bg-nx-cyan-light/30">Ripristina</button>
+                <button type="button" data-purge-verbale={v.id} data-title={v.title} class="rounded border border-red-300 px-3 py-1 font-semibold text-red-600 hover:bg-red-50">Elimina definitivamente</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </details>
+    )}
+  </section>
+
+  <hr class="my-10 border-nx-gray-light/30" />
+
   <div>
-    <h2 class="text-2xl font-bold text-nx-dark">Verbali e documenti dell'associazione</h2>
-    <p class="mt-2 max-w-3xl text-sm text-nx-gray-dark">
-      Cartelle Google Drive con i documenti utili alla vita dell'associazione. Click per
-      aprire la cartella su Drive — l'accesso richiede di essere loggato con un account
-      condiviso (chiedi a Vittorio se non vedi il contenuto).
+    <h3 class="text-base font-bold text-nx-dark">Cartelle Drive</h3>
+    <p class="mt-1 text-xs text-nx-gray-dark">
+      Documenti su Google Drive. L'accesso richiede di essere loggato con un account condiviso.
     </p>
   </div>
 
@@ -85,3 +187,54 @@ function iconFor(name: string): string {
   )}
 
 </AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    // Cestina (soft-delete)
+    document.querySelectorAll("[data-trash-verbale]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const id = btn.getAttribute("data-trash-verbale");
+        const title = btn.getAttribute("data-title") || "questo verbale";
+        if (!confirm(`Spostare "${title}" nel cestino?\n\nNon comparirà più nella lista, ma potrai ripristinarlo dal cestino.`)) return;
+        btn.disabled = true; btn.textContent = "…";
+        try {
+          const res = await fetch("/api/verbali/" + encodeURIComponent(id), { method: "DELETE" });
+          const data = await res.json();
+          if (!res.ok || !data.ok) { alert("Errore: " + (data.error || res.status)); btn.disabled = false; btn.textContent = "Cestina"; return; }
+          location.reload();
+        } catch (e) { alert("Errore di rete"); btn.disabled = false; btn.textContent = "Cestina"; }
+      });
+    });
+
+    // Ripristina dal cestino
+    document.querySelectorAll("[data-restore-verbale]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const id = btn.getAttribute("data-restore-verbale");
+        btn.disabled = true;
+        try {
+          const res = await fetch("/api/verbali/" + encodeURIComponent(id) + "/restore", { method: "POST" });
+          const data = await res.json();
+          if (!res.ok || !data.ok) { alert("Errore: " + (data.error || res.status)); btn.disabled = false; return; }
+          location.reload();
+        } catch (e) { alert("Errore di rete"); btn.disabled = false; }
+      });
+    });
+
+    // Elimina definitivamente (dal cestino)
+    document.querySelectorAll("[data-purge-verbale]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        const id = btn.getAttribute("data-purge-verbale");
+        const title = btn.getAttribute("data-title") || "questo verbale";
+        if (!confirm(`Eliminare DEFINITIVAMENTE "${title}"?\n\nVengono cancellati il verbale, le firme, gli allegati e i relativi file su Drive. L'azione è IRREVERSIBILE.`)) return;
+        btn.disabled = true; btn.textContent = "…";
+        try {
+          const res = await fetch("/api/verbali/" + encodeURIComponent(id) + "?permanent=1", { method: "DELETE" });
+          const data = await res.json();
+          if (!res.ok || !data.ok) { alert("Errore: " + (data.error || res.status)); btn.disabled = false; btn.textContent = "Elimina definitivamente"; return; }
+          const row = document.querySelector(`[data-trash-row][data-verbale-id="${id}"]`);
+          if (row) row.remove();
+        } catch (e) { alert("Errore di rete"); btn.disabled = false; btn.textContent = "Elimina definitivamente"; }
+      });
+    });
+  })();
+</script>

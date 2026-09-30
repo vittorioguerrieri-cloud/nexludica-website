@@ -4,19 +4,20 @@ import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
 export const prerender = false;
 ---
 
-<AreaSociLayout title="Nuovo resoconto — Area Soci" active="articoli">
+<AreaSociLayout title="Nuovo articolo — Area Soci" active="articoli">
   <a href="/area-soci/articoli" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">
     ← Torna ai miei articoli
   </a>
 
   <div class="mt-4 rounded-xl border border-nx-gray-light/20 bg-white p-8">
-    <h2 class="text-2xl font-bold text-nx-dark">Carica un resoconto MeetLudica</h2>
+    <h2 class="text-2xl font-bold text-nx-dark">Nuovo articolo MeetLudica</h2>
     <p class="mt-2 text-sm text-nx-gray-dark">
-      Compila i dati del talk: il resoconto sarà pubblicato sull'archivio della pagina
-      <a href="/meetludica" class="text-nx-cyan no-underline hover:underline">MeetLudica</a>.
+      Inserisci i dati del talk e il testo dell'articolo in <strong>markdown</strong>. Verrà creato come bozza:
+      potrai rifinirlo con l'anteprima live e pubblicarlo dall'editor. Il PDF brandizzato è generato in automatico dal markdown
+      (non serve caricare nulla).
     </p>
 
-    <form id="article-form" class="mt-8 space-y-5" enctype="multipart/form-data">
+    <form id="article-form" class="mt-8 space-y-5">
       <div class="grid gap-5 sm:grid-cols-2">
         <div class="sm:col-span-2">
           <label for="title" class="block text-sm font-medium text-nx-dark">Titolo del talk *</label>
@@ -42,40 +43,27 @@ export const prerender = false;
                  class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
         </div>
         <div class="sm:col-span-2">
-          <label for="abstract" class="block text-sm font-medium text-nx-dark">Abstract *</label>
-          <textarea id="abstract" name="abstract" rows="6" required maxlength="5000"
+          <label for="abstract" class="block text-sm font-medium text-nx-dark">Abstract</label>
+          <textarea id="abstract" name="abstract" rows="3" maxlength="5000"
                     placeholder="Sintesi del talk e dei principali spunti emersi nella discussione."
                     class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
         </div>
         <div class="sm:col-span-2">
-          <label for="document" class="block text-sm font-medium text-nx-dark">Documento PDF</label>
-          <input type="file" id="document" name="document" accept="application/pdf"
-                 class="mt-1 block w-full rounded-lg border border-dashed border-nx-gray-light/40 bg-nx-off-white px-4 py-3 text-sm text-nx-dark outline-none file:mr-4 file:rounded-md file:border-0 file:bg-nx-cyan file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-wider file:text-white" />
-          <p class="mt-1 text-xs text-nx-gray-dark">Max 10 MB. Formato consigliato: PDF.</p>
-        </div>
-        <div class="sm:col-span-2">
-          <label for="videoUrl" class="block text-sm font-medium text-nx-dark">Link registrazione (opzionale)</label>
-          <input type="url" id="videoUrl" name="videoUrl" maxlength="500"
-                 placeholder="https://"
-                 class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="block text-sm font-medium text-nx-dark">Stato di pubblicazione</label>
-          <div class="mt-2 flex gap-4 text-sm">
-            <label class="flex items-center gap-2">
-              <input type="radio" name="status" value="published" checked class="h-4 w-4 text-nx-cyan" />
-              <span>Pubblicato (visibile a tutti)</span>
-            </label>
-            <label class="flex items-center gap-2">
-              <input type="radio" name="status" value="draft" class="h-4 w-4 text-nx-cyan" />
-              <span>Bozza (visibile solo a me)</span>
-            </label>
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <label for="body" class="block text-sm font-medium text-nx-dark">Corpo dell'articolo (markdown)</label>
+            <span class="text-xs text-nx-gray-dark">
+              <code>## Titolo</code>, <code>**grassetto**</code>, <code>*corsivo*</code>, <code>- elenco</code>, <code>&gt; citazione</code>, <code>---</code>
+            </span>
           </div>
+          <textarea id="body" name="body" rows="16"
+                    placeholder={"## Introduzione\n\nScrivi qui l'articolo in markdown. Potrai vedere l'anteprima e pubblicare nel passo successivo."}
+                    class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-3 font-mono text-xs leading-relaxed text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+          <p class="mt-1 text-xs text-nx-gray-dark">Puoi anche lasciarlo vuoto e scriverlo dopo nell'editor con anteprima.</p>
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-4 pt-2">
         <button type="submit" class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50">
-          Pubblica resoconto
+          Crea e vai all'editor
         </button>
         <a href="/area-soci/articoli" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">
           Annulla
@@ -93,22 +81,38 @@ export const prerender = false;
     if (!form) return;
     form.addEventListener("submit", async function (e) {
       e.preventDefault();
-      status.textContent = "Caricamento in corso...";
+      status.textContent = "Creazione in corso...";
       status.className = "text-sm text-nx-gray-dark";
       const fd = new FormData(form);
+      const payload = {
+        title: fd.get("title"),
+        speaker: fd.get("speaker"),
+        meetingDate: fd.get("meetingDate"),
+        abstract: fd.get("abstract") || "",
+        tags: fd.get("tags") || "",
+        body: fd.get("body") || "",
+        status: "draft",
+      };
       const btn = form.querySelector("button[type=submit]");
       btn.disabled = true;
       try {
-        const res = await fetch("/api/articles", { method: "POST", body: fd });
+        const res = await fetch("/api/articles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
         const data = await res.json();
         if (!res.ok || !data.ok) {
           status.textContent = "Errore: " + (data.error || res.status);
           status.className = "text-sm text-red-600";
           btn.disabled = false;
-        } else {
-          status.textContent = "✓ Pubblicato. Reindirizzamento...";
+        } else if (data.editToken) {
+          status.textContent = "✓ Creato. Apro l'editor...";
           status.className = "text-sm text-emerald-600";
-          setTimeout(() => { window.location.href = "/area-soci/articoli"; }, 800);
+          setTimeout(() => { window.location.href = "/meetludica/modifica/" + data.editToken; }, 600);
+        } else {
+          // Fallback: torna alla lista se per qualche motivo manca il token
+          window.location.href = "/area-soci/articoli";
         }
       } catch (e) {
         status.textContent = "Errore di rete";

@@ -2,10 +2,14 @@
 	"compatibility_date": "2026-05-05",
 	"compatibility_flags": ["global_fetch_strictly_public", "nodejs_compat"],
 	"name": "nexludica-website",
-	"main": "@astrojs/cloudflare/entrypoints/server",
+	// Entry nostro: mette il controllo password del catalogo davanti al worker di Astro.
+	"main": "./worker/index.ts",
 	"assets": {
 		"directory": "./dist",
-		"binding": "ASSETS"
+		"binding": "ASSETS",
+		// Il catalogo miniature e i suoi media passano sempre dal worker, che chiede la password
+		// prima di servire qualsiasi file (altrimenti gli asset statici uscirebbero senza controllo).
+		"run_worker_first": ["/catalogo-miniature", "/catalogo-miniature/*", "/r2/mmf/*"]
 	},
 	"d1_databases": [
 		{
@@ -22,9 +26,9 @@
 	],
 	"vars": {
 		"SITE_URL": "https://nexludica.org",
-		"FROM_EMAIL": "noreply@nexludica.org",
+		"FROM_EMAIL": "meetludica@nexludica.org",
 		"FROM_NAME": "NexLudica APS",
-		"DRIVE_ROOT_FOLDER_ID": "1xS3oQf-4mV7dRgjtIqwPO7KI0rvXF0xy"
+		"DRIVE_ROOT_FOLDER_ID": "0AHCTuGevwJGYUk9PVA"
 	},
 	"observability": {
 		"enabled": true

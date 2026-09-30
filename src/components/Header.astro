@@ -16,17 +16,13 @@ const navItems = [
   <div class="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
     <a href="/" class="header-brand relative flex items-center no-underline" aria-label="NexLudica - home">
       <img
-        src="/images/branding/logo-horizontal.svg"
-        alt="NexLudica"
+        src="/images/branding/logo-horizontal-equity.png"
+        srcset="/images/branding/logo-horizontal-equity.png 1x, /images/branding/logo-horizontal-equity@2x.png 2x"
+        alt="NexLudica — Game · Research · Equity"
         class="logo-default h-12 w-auto sm:h-14"
         loading="eager"
-      />
-      <img
-        src="/images/branding/logo-horizontal-white.svg"
-        alt=""
-        aria-hidden="true"
-        class="logo-white absolute inset-0 h-12 w-auto opacity-0 sm:h-14"
-        loading="eager"
+        width="480"
+        height="182"
       />
     </a>
     <nav class="hidden md:block">
@@ -78,19 +74,11 @@ const navItems = [
   }
 
   /*
-   * Due versioni del logo, sovrapposte: quando scrolled, fade tra le due.
-   * - logo-horizontal.svg: gray (Ludica) + cyan (Nex/dadi) → sfondo chiaro
-   * - logo-horizontal-white.svg: white (Ludica) + cyan (Nex/dadi) → sfondo scuro
+   * Logo PNG "Game · Research · Equity" (980x420, già compresso a 41KB/89KB retina).
+   * Niente swap dark mode per ora: il PNG ha sfondo trasparente.
    */
-  .logo-default,
-  .logo-white {
-    transition: opacity 0.25s ease;
-  }
-  .site-header.is-scrolled .logo-default {
-    opacity: 0;
-  }
-  .site-header.is-scrolled .logo-white {
-    opacity: 1;
+  .logo-default {
+    transition: filter 0.25s ease;
   }
 
   .header-link {

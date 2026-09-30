@@ -1,26 +1,56 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import { upcomingMeetings } from "../lib/meetludica";
+import { upcomingMeetings, formatItalianDate } from "../lib/meetludica";
 import { getDb, getEnv } from "../server/db";
 import { listPublishedArticles, type PublicArticle } from "../server/articles";
+import { listUpcomingEvents } from "../server/meetludica";
 
 export const prerender = false;
-
-const meetings = upcomingMeetings(6);
 
 const env = await getEnv();
 const db = getDb(env as Env);
 let articles: PublicArticle[] = [];
+let dbEvents: Awaited<ReturnType<typeof listUpcomingEvents>> = [];
 if (db) {
   try {
     articles = await listPublishedArticles(db);
   } catch {
     articles = [];
   }
+  try {
+    dbEvents = await listUpcomingEvents(db, 6);
+  } catch {
+    dbEvents = [];
+  }
 }
+
+const giornoRoma = (d: Date) => d.toLocaleDateString("it-IT", { timeZone: "Europe/Rome" });
+
+// Calendario: usa le serate fissate nel DB se presenti, altrimenti ricade
+// sulle ricorrenze calcolate (ultimo giovedì del mese).
+interface CalEntry {
+  date: Date;
+  label: string;
+  title?: string | null;
+  description?: string | null;
+  location?: string | null;
+  meetingUrl?: string | null;
+  oggi?: boolean;
+}
+const meetings: CalEntry[] = dbEvents.length > 0
+  ? dbEvents.map((e) => ({
+      date: new Date(e.eventDate),
+      label: formatItalianDate(new Date(e.eventDate)),
+      title: e.title,
+      description: e.description,
+      location: e.location,
+      meetingUrl: e.meetingUrl,
+      oggi: giornoRoma(new Date(e.eventDate)) === giornoRoma(new Date()),
+    }))
+  : upcomingMeetings(6).map((m) => ({ date: m.date, label: m.label }));
 ---
 
-<BaseLayout title="MeetLudica — NexLudica APS" description="MeetLudica: il network mensile di chi fa ricerca sul gioco da tavolo. Ultimo giovedì del mese, 19:00. Calendario, archivio articoli e modalità di partecipazione.">
+<BaseLayout title="MeetLudica — NexLudica APS" description="MeetLudica: il network mensile di chi fa ricerca sul gioco da tavolo. Ultimo giovedì del mese, 20:00. Calendario, archivio articoli e modalità di partecipazione.">
   <!-- Hero -->
   <section class="relative overflow-hidden bg-nx-off-white px-4 pb-20 pt-28 lg:pt-32">
     <div class="relative mx-auto max-w-4xl">
@@ -31,14 +61,39 @@ if (db) {
         Meet<span class="text-nx-cyan">Ludica</span>
       </h1>
       <p class="mt-8 max-w-2xl text-lg leading-relaxed text-nx-gray-dark">
-        Un incontro mensile per <strong class="text-nx-dark">unire ricercatrici e ricercatori
-        sul gioco da tavolo</strong>, restare connessi e aggiornati sul panorama della ricerca
-        ludica.
+        Un incontro mensile per <strong class="text-nx-dark">connettere chi fa ricerca
+        sul gioco da tavolo</strong>, restare in contatto e aggiornarsi sul panorama
+        della ricerca ludica.
       </p>
       <p class="mt-4 max-w-2xl text-base text-nx-gray-dark">
-        L'obiettivo è rendere la ricerca ludica più accessibile, favorire la connessione tra
-        ricercatori e dare risonanza a progetti meritevoli.
+        L'obiettivo è rendere la ricerca ludica più accessibile, favorire le connessioni
+        nella community di ricerca e dare risonanza a progetti meritevoli.
       </p>
+      <div class="mt-8 flex flex-wrap items-center gap-3">
+        <a
+          href="/meetludica/proponi"
+          class="inline-flex items-center gap-2 rounded-lg bg-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-white no-underline shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue"
+        >
+          Proponi un talk
+          <span class="text-base leading-none">→</span>
+        </a>
+        <button
+          type="button"
+          data-meetludica-open
+          class="inline-flex items-center gap-2 rounded-lg border-2 border-nx-cyan px-6 py-3 text-sm font-bold uppercase tracking-wider text-nx-cyan transition hover:bg-nx-cyan-light/30"
+        >
+          Unisciti alla conversazione
+        </button>
+        {articles.length > 0 && (
+          <a
+            href="#archivio"
+            class="inline-flex items-center gap-2 rounded-lg border border-nx-gray-light/50 px-6 py-3 text-sm font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
+          >
+            Leggi i resoconti
+            <span class="text-base leading-none">↓</span>
+          </a>
+        )}
+      </div>
     </div>
   </section>
 
@@ -49,7 +104,7 @@ if (db) {
       <div class="rounded-xl border-l-4 border-nx-cyan bg-nx-off-white p-6">
         <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Quando</p>
         <p class="mt-2 text-lg font-semibold text-nx-dark">Ultimo giovedì del mese</p>
-        <p class="mt-1 text-sm text-nx-gray-dark">Ore 19:00, online.</p>
+        <p class="mt-1 text-sm text-nx-gray-dark">Ore 20:00, online.</p>
       </div>
       <div class="rounded-xl border-l-4 border-nx-cyan bg-nx-off-white p-6">
         <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Talk</p>
@@ -69,8 +124,7 @@ if (db) {
     <p class="mt-8 max-w-3xl text-base leading-relaxed text-nx-gray-dark">
       Dopo ogni incontro pubblichiamo un <strong class="text-nx-dark">resoconto</strong> con
       il riepilogo del progetto presentato e i feedback emersi durante la discussione.
-      I soci possono caricare i propri resoconti dalla
-      <a href="/area-soci/articoli/nuovo" class="text-nx-cyan no-underline hover:underline">area soci</a>.
+      Chi è iscrittə puo' caricare i propri resoconti dall'<a href="/area-soci/articoli/nuovo" class="text-nx-cyan no-underline hover:underline">area soci</a>.
     </p>
   </section>
 
@@ -79,42 +133,61 @@ if (db) {
     <div class="mx-auto max-w-5xl">
       <div class="flex flex-wrap items-baseline justify-between gap-4">
         <h2 class="text-3xl font-bold">Prossimi appuntamenti</h2>
-        <p class="text-sm text-white/60">Ricorrenza: ogni ultimo giovedì del mese, 19:00</p>
+        <p class="text-sm text-white/60">Ricorrenza: ogni ultimo giovedì del mese, 20:00</p>
       </div>
       <ul class="mt-10 space-y-3">
         {meetings.map((m, i) => (
-          <li class={`flex items-center gap-6 rounded-lg p-5 transition ${
+          <li class={`flex items-start gap-6 rounded-lg p-5 transition ${
             i === 0 ? "bg-nx-cyan text-nx-dark" : "bg-white/5 hover:bg-white/10"
           }`}>
             <div class="flex shrink-0 flex-col items-center justify-center rounded-md bg-white/90 px-4 py-2 text-nx-dark">
               <span class="text-xs font-bold uppercase tracking-wider">
-                {m.date.toLocaleDateString("it-IT", { month: "short" }).replace(".", "")}
+                {m.date.toLocaleDateString("it-IT", { month: "short", timeZone: "Europe/Rome" }).replace(".", "")}
               </span>
               <span class="text-2xl font-black leading-none">
-                {m.date.getDate()}
+                {m.date.toLocaleDateString("it-IT", { day: "numeric", timeZone: "Europe/Rome" })}
               </span>
-              <span class="text-xs">{m.date.getFullYear()}</span>
+              <span class="text-xs">{m.date.toLocaleDateString("it-IT", { year: "numeric", timeZone: "Europe/Rome" })}</span>
             </div>
             <div class="flex-1">
               <p class={`text-base font-semibold ${i === 0 ? "text-nx-dark" : "text-white"}`}>
-                {m.label}
+                {m.title || m.label}
               </p>
-              <p class={`text-sm ${i === 0 ? "text-nx-dark/70" : "text-white/60"}`}>
-                {i === 0 ? "Prossimo incontro" : "Programmato"}
+              <p class={`text-xs ${i === 0 ? "text-nx-dark/70" : "text-white/50"}`}>
+                {m.label}{m.location ? ` · ${m.location}` : ""}{m.oggi ? " · Oggi" : i === 0 ? " · Prossimo incontro" : ""}
               </p>
+              {m.description && (
+                <p class={`mt-2 text-sm leading-relaxed ${i === 0 ? "text-nx-dark/90" : "text-white/80"}`}>
+                  {m.description}
+                </p>
+              )}
+              {m.meetingUrl && (
+                <a
+                  href={m.meetingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class={`mt-3 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider no-underline transition ${
+                    i === 0 ? "bg-nx-dark text-white hover:bg-black" : "border border-white/30 text-white hover:bg-white/10"
+                  }`}
+                >
+                  {m.oggi ? "Entra nella call" : "Link della call"}
+                  <span aria-hidden="true">→</span>
+                </a>
+              )}
             </div>
           </li>
         ))}
       </ul>
       <div class="mt-10 flex flex-wrap items-center gap-4">
-        <a
-          href="mailto:info@nexludica.org?subject=Iscrizione%20MeetLudica"
-          class="inline-block rounded-lg bg-white px-6 py-3 text-sm font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:bg-nx-cyan-light"
+        <button
+          type="button"
+          data-meetludica-open
+          class="inline-block rounded-lg bg-white px-6 py-3 text-sm font-bold uppercase tracking-wider text-nx-dark transition hover:bg-nx-cyan-light"
         >
           Voglio partecipare
-        </a>
+        </button>
         <a
-          href="mailto:info@nexludica.org?subject=Proposta%20talk%20MeetLudica"
+          href="/meetludica/proponi"
           class="inline-block border-b-2 border-white px-2 py-2 text-sm font-bold uppercase tracking-wider text-white no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
         >
           Proponi un talk →
@@ -124,7 +197,7 @@ if (db) {
   </section>
 
   <!-- Archivio articoli -->
-  <section class="mx-auto max-w-5xl px-4 py-20">
+  <section id="archivio" class="mx-auto max-w-5xl px-4 py-20 scroll-mt-24">
     <div class="flex flex-wrap items-baseline justify-between gap-4">
       <h2 class="text-3xl font-bold text-nx-dark">Archivio dei resoconti</h2>
       <p class="text-sm text-nx-gray-dark">
@@ -140,7 +213,7 @@ if (db) {
           abstract e materiali dei relatori.
         </p>
         <p class="mt-4 text-sm text-nx-gray-dark">
-          Sei un socio?
+          Fai parte di NexLudica?
           <a href="/area-soci/articoli/nuovo" class="font-semibold text-nx-cyan no-underline hover:underline">
             Carica il primo resoconto
           </a>.
@@ -149,10 +222,12 @@ if (db) {
     ) : (
       <ul class="mt-10 space-y-6">
         {articles.map((a) => (
-          <li class="rounded-xl border border-nx-gray-light/20 bg-white p-6 transition hover:shadow-md">
+          <li id={a.slug} class="scroll-mt-24 rounded-xl border border-nx-gray-light/20 bg-white p-6 transition hover:shadow-md target:border-nx-cyan target:shadow-lg">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 class="text-xl font-bold text-nx-dark">{a.title}</h3>
+                <h3 class="text-xl font-bold text-nx-dark">
+                  <a href={`/meetludica/${a.slug}`} class="no-underline hover:text-nx-cyan">{a.title}</a>
+                </h3>
                 <p class="mt-1 text-sm text-nx-gray-dark">
                   {a.speaker} · {new Date(a.meetingDate).toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric" })}
                 </p>
@@ -170,16 +245,14 @@ if (db) {
                 </div>
               )}
             </div>
-            <p class="mt-3 leading-relaxed text-nx-gray-dark whitespace-pre-line">{a.abstract}</p>
+            <p class="mt-3 leading-relaxed text-nx-gray-dark whitespace-pre-line line-clamp-4">{a.abstract}</p>
             <div class="mt-4 flex flex-wrap gap-4">
-              {a.documentUrl && (
-                <a href={a.documentUrl} target="_blank" rel="noopener noreferrer" class="text-sm font-semibold text-nx-cyan no-underline hover:underline">
-                  📄 Leggi il resoconto
-                </a>
-              )}
+              <a href={`/meetludica/${a.slug}`} class="text-sm font-semibold text-nx-cyan no-underline hover:underline">
+                Leggi tutto →
+              </a>
               {a.videoUrl && (
                 <a href={a.videoUrl} target="_blank" rel="noopener noreferrer" class="text-sm font-semibold text-nx-cyan no-underline hover:underline">
-                  ▶ Guarda la registrazione
+                  🔗 Progetto / contenuti
                 </a>
               )}
             </div>
@@ -189,7 +262,61 @@ if (db) {
     )}
   </section>
 
-  <!-- CTA partecipa -->
+  <!-- Modal iscrizione MeetLudica mailing list -->
+  <div
+    id="meetludica-modal"
+    class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4"
+    role="dialog"
+    aria-labelledby="meetludica-modal-title"
+    aria-modal="true"
+  >
+    <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 id="meetludica-modal-title" class="text-lg font-bold text-nx-dark">Iscriviti a MeetLudica</h3>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Ti avviseremo prima di ogni incontro mensile. Niente spam.
+          </p>
+        </div>
+        <button type="button" data-meetludica-close class="text-2xl leading-none text-nx-gray-dark hover:text-nx-dark" aria-label="Chiudi">×</button>
+      </div>
+      <form id="meetludica-form" class="mt-4 space-y-3">
+        <!-- Honeypot anti-bot: campo nascosto -->
+        <input type="text" name="company" tabindex="-1" autocomplete="off" style="position:absolute; left:-9999px; opacity:0; pointer-events:none;" />
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Nome <span class="text-red-500">*</span></label>
+          <input name="name" required maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Email <span class="text-red-500">*</span></label>
+          <input type="email" name="email" required maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Note (opzionale)</label>
+          <textarea name="motivation" rows="3" maxlength="1000" placeholder="Cosa ti interessa di MeetLudica? Hai un ambito di ricerca particolare?" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+        </div>
+        <p class="text-xs leading-relaxed text-nx-gray-dark">
+          Usiamo nome ed email solo per mandarti le comunicazioni di MeetLudica; ti puoi
+          disiscrivere in qualsiasi momento. Titolare è NexLudica APS: dettagli
+          nell'<a href="/privacy-policy" target="_blank" class="underline">informativa privacy</a>.
+        </p>
+        <div class="flex flex-wrap items-center gap-3 pt-2">
+          <button type="submit" id="meetludica-submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-sm font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">
+            Iscriviti
+          </button>
+          <button type="button" data-meetludica-close class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">
+            Annulla
+          </button>
+          <span id="meetludica-status" class="text-xs"></span>
+        </div>
+      </form>
+      <p class="mt-3 text-[11px] text-nx-gray-dark">
+        Trattiamo i tuoi dati solo per inviarti gli avvisi di MeetLudica. Puoi disiscriverti
+        in qualsiasi momento scrivendo a <a href="mailto:info@nexludica.org" class="text-nx-cyan no-underline hover:underline">info@nexludica.org</a>.
+      </p>
+    </div>
+  </div>
+
   <section class="bg-nx-off-white px-4 py-16">
     <div class="mx-auto max-w-3xl text-center">
       <h2 class="text-3xl font-bold text-nx-dark">Unisciti al network</h2>
@@ -197,12 +324,83 @@ if (db) {
         MeetLudica è aperto a chiunque faccia ricerca, design o pratica educativa
         attorno al gioco da tavolo. Scrivici per iscriverti o per proporre un talk.
       </p>
-      <a
-        href="mailto:info@nexludica.org?subject=Iscrizione%20MeetLudica"
-        class="mt-8 inline-block rounded-lg bg-nx-cyan px-7 py-3.5 text-sm font-bold uppercase tracking-wider text-white no-underline shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue"
+      <button
+        type="button"
+        data-meetludica-open
+        class="mt-8 inline-block rounded-lg bg-nx-cyan px-7 py-3.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue"
       >
-        Scrivici per iscriverti
-      </a>
+        Iscriviti alla mailing list
+      </button>
     </div>
   </section>
 </BaseLayout>
+
+<script is:inline>
+  (function () {
+    const modal = document.getElementById("meetludica-modal");
+    const form = document.getElementById("meetludica-form");
+    const statusEl = document.getElementById("meetludica-status");
+    const submitBtn = document.getElementById("meetludica-submit");
+    if (!modal || !form) return;
+
+    function open() {
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+      const first = form.querySelector("input[name=name]");
+      if (first) first.focus();
+      statusEl.textContent = "";
+    }
+    function close() {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+    }
+    // Bottoni di apertura (qualsiasi elemento con data-meetludica-open)
+    document.querySelectorAll("[data-meetludica-open]").forEach((b) => {
+      b.addEventListener("click", open);
+    });
+    // Bottoni di chiusura
+    modal.querySelectorAll("[data-meetludica-close]").forEach((b) => {
+      b.addEventListener("click", close);
+    });
+    // Click sul backdrop → chiude
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) close();
+    });
+    // ESC → chiude
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden")) close();
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      statusEl.textContent = "Invio in corso…";
+      statusEl.className = "text-xs text-nx-gray-dark";
+      const fd = new FormData(form);
+      const body = Object.fromEntries(fd.entries());
+      try {
+        const res = await fetch("/api/meetludica/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          statusEl.textContent = "✗ " + (data.error || res.status);
+          statusEl.className = "text-xs text-red-600";
+          submitBtn.disabled = false;
+          return;
+        }
+        statusEl.textContent = "✓ Iscrizione confermata. Ti aspettiamo al prossimo MeetLudica!";
+        statusEl.className = "text-xs font-semibold text-emerald-600";
+        form.reset();
+        setTimeout(() => close(), 2200);
+      } catch (err) {
+        statusEl.textContent = "Errore di rete";
+        statusEl.className = "text-xs text-red-600";
+        submitBtn.disabled = false;
+      }
+    });
+  })();
+</script>
+

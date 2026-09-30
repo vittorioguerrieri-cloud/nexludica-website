@@ -1,0 +1,853 @@
+---
+/**
+ * Report finale di una sessione: aggrega tutti i dati raccolti e li
+ * organizza in formato leggibile / stampabile.
+ *
+ * Sezioni:
+ *  1. Header con metadata della sessione
+ *  2. KPI rapidi (tempo totale, flow score, n giocatori, n turni)
+ *  3. Sintesi narrativa (dalla fase di debriefing)
+ *  4. Criticità → soluzioni
+ *  5. Cose poco chiare → soluzioni
+ *  6. Tabella OMNI (4 colonne)
+ *  7. Sempre sottocchio (4 colonne)
+ *  8. Aggregati checklist (media per categoria, per fase)
+ *  9. Storico turni (per round)
+ * 10. Stats giocatori / squadre (totali, downtime)
+ */
+import PlaytestLayout from "../../../../layouts/PlaytestLayout.astro";
+import { getDb, getEnv } from "../../../../server/db";
+import { getUser } from "../../../../server/guards";
+import {
+  getSession,
+  getGameById,
+  listPlayers,
+  listTurns,
+  listPhaseTimes,
+  listChecklistInstances,
+  listChecklistItems,
+  listChecklistResponses,
+  listObservations,
+  listOmniComments,
+  listSessionCollaborators,
+  mergeTurns,
+  computeGradimentoStats,
+  type Player,
+  type Turn,
+} from "../../../../server/playtest";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) {
+  const nextUrl = encodeURIComponent(new URL(Astro.request.url).toString());
+  return Astro.redirect(`https://nexludica.org/login?next=${nextUrl}`);
+}
+
+const { id } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db || !id) return new Response("Not found", { status: 404 });
+const session = await getSession(db, String(id));
+if (!session) return new Response("Sessione non trovata", { status: 404 });
+const game = await getGameById(db, session.gameId);
+if (!game) return new Response("Gioco non trovato", { status: 404 });
+
+const players = await listPlayers(db, session.id);
+const turns = await listTurns(db, session.id);
+const phaseTimes = await listPhaseTimes(db, session.id);
+const instances = await listChecklistInstances(db, session.id);
+const obsItems = await listChecklistItems(db, "observation", game.id);
+const observations = await listObservations(db, session.id);
+const omniComments = await listOmniComments(db, session.id);
+const gradimento = await computeGradimentoStats(db, session.id);
+const collaborators = await listSessionCollaborators(db, session.id);
+
+// Merge turni: stessa coppia (round, playerId) registrata da osservatori
+// diversi → un'unica entry "mediana" (durata media + punti medi).
+const mergedTurns = mergeTurns(turns);
+const hasMultiUserData = mergedTurns.some((m) => m.recordersCount > 1) || collaborators.length > 1;
+
+// Squadre effettive
+const teams = session.teamsOverride && session.teamsOverride.length > 0
+  ? session.teamsOverride
+  : (game.procedureConfig.teams ?? []);
+const isTeamGame = !!game.procedureConfig.is_team_game;
+
+// === COMPUTED METRICS (basati sui turni MERGED per evitare double-counting
+// quando più osservatori cronometrano lo stesso turno) ===
+const totalSec = mergedTurns.reduce((a, m) => a + m.avgDurationSeconds, 0);
+const totalMinutes = totalSec / 60;
+const phaseTotalMin = phaseTimes.reduce((a, p) => a + p.minutes, 0);
+const grandTotalMin = totalMinutes + phaseTotalMin;
+
+const avgTurnSec = mergedTurns.length > 0 ? totalSec / mergedTurns.length : 0;
+
+// Per player aggregates: usa MergedTurn (un solo "turno consenso" per (round, player))
+function playerAgg(p: Player) {
+  const my = mergedTurns.filter((m) => m.playerId === p.id);
+  const playSec = my.reduce((a, m) => a + m.avgDurationSeconds, 0);
+  const downtimeSec = totalSec - playSec;
+  const points = my.reduce((a, m) => a + (Number(m.avgPoints1) || 0), 0);
+  const points2 = my.reduce((a, m) => a + (Number(m.avgPoints2) || 0), 0);
+  return { p, playSec, downtimeSec, points, points2, turns: my.length };
+}
+const playerStats = players.map(playerAgg).sort((a, b) => b.points - a.points);
+
+// Team totals: usa MergedTurn — somma dei teamPoints medi per ogni round
+function teamTotal(idx: number): number {
+  return mergedTurns.reduce((acc, m) => {
+    if (m.avgTeamPoints && m.avgTeamPoints.length > idx) {
+      return acc + (Number(m.avgTeamPoints[idx]) || 0);
+    }
+    if (teams.length === 2) {
+      return acc + (idx === 0 ? Number(m.avgPoints1) || 0 : Number(m.avgPoints2) || 0);
+    }
+    return acc;
+  }, 0);
+}
+const teamStats = teams.map((t, i) => ({
+  team: t,
+  total: teamTotal(i),
+  players: players.filter((p) => p.teamIndex === i),
+}));
+
+// Checklist aggregates: media per categoria attraverso tutte le istanze osservative
+type CatAgg = { category: string; subcategory: string | null; text: string; n: number; sum: number; comments: string[]; phase: string }[];
+const allResponses: { instance: typeof instances[number]; itemId: string; score: number | null; comment: string | null }[] = [];
+for (const inst of instances) {
+  const rs = await listChecklistResponses(db, inst.id);
+  for (const r of rs) {
+    allResponses.push({ instance: inst, itemId: r.itemId, score: r.score, comment: r.comment });
+  }
+}
+const itemAvgs: Record<string, { item: typeof obsItems[number]; n: number; sum: number; comments: { phase: string; text: string }[] }> = {};
+for (const it of obsItems) {
+  itemAvgs[it.id] = { item: it, n: 0, sum: 0, comments: [] };
+}
+for (const r of allResponses) {
+  if (r.instance.phase === "setup") continue;
+  if (itemAvgs[r.itemId]) {
+    if (r.score != null) {
+      itemAvgs[r.itemId].n += 1;
+      itemAvgs[r.itemId].sum += r.score;
+    }
+    if (r.comment) itemAvgs[r.itemId].comments.push({ phase: r.instance.phase, text: r.comment });
+  }
+}
+// Aggrega per categoria
+const itemAvgList = Object.values(itemAvgs)
+  .filter((x) => x.n > 0 || x.comments.length > 0)
+  .sort((a, b) => a.item.position - b.item.position);
+const byCategoryAvg: Record<string, number[]> = {};
+for (const x of itemAvgList) {
+  if (x.n > 0) {
+    byCategoryAvg[x.item.category] = byCategoryAvg[x.item.category] || [];
+    byCategoryAvg[x.item.category].push(x.sum / x.n);
+  }
+}
+const categoryAvgs = Object.entries(byCategoryAvg).map(([cat, vals]) => ({
+  category: cat, avg: vals.reduce((a, b) => a + b, 0) / vals.length,
+}));
+
+// OMNI grouped
+const omniByCat: Record<string, typeof omniComments> = {
+  ottimo: [], modificare: [], non_chiaro: [], idee_nuove: [],
+};
+for (const o of omniComments) omniByCat[o.category]?.push(o);
+
+const obsByCat: Record<string, typeof observations> = {
+  variabili_visibili: [], variabili_invisibili: [], equita: [], lamentele: [],
+};
+for (const o of observations) obsByCat[o.category]?.push(o);
+
+const report = session.reportData ?? { criticita: [], cose_poco_chiare: [], narrative_summary: "" };
+// Storico turni: usa i MergedTurn (un'entry per round/player anche se più
+// osservatori hanno cronometrato lo stesso turno)
+const mergedByRound = new Map<number, typeof mergedTurns>();
+for (const m of mergedTurns) {
+  if (!mergedByRound.has(m.round)) mergedByRound.set(m.round, []);
+  mergedByRound.get(m.round)!.push(m);
+}
+
+function fmtSec(s: number): string {
+  const m = Math.floor(s / 60); const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+const omniLabels: Record<string, string> = {
+  ottimo: "Ottimo", modificare: "Modificare", non_chiaro: "Non chiaro", idee_nuove: "Idee nuove",
+};
+const obsLabels: Record<string, string> = {
+  variabili_visibili: "Variabili visibili",
+  variabili_invisibili: "Variabili invisibili",
+  equita: "Equità",
+  lamentele: "Lamentele",
+};
+---
+
+<PlaytestLayout
+  title={`Report — ${session.label}`}
+  crumbs={[
+    { label: game.name, href: `/giochi/${game.slug}` },
+    { label: session.label, href: `/sessioni/${session.id}` },
+    { label: "Report" },
+  ]}
+>
+  <div class="flex flex-wrap items-center justify-between gap-3 print:hidden">
+    <h1 class="text-2xl font-black text-nx-dark">Report sessione</h1>
+    <div class="flex flex-wrap gap-2">
+      <a
+        href={`/api/playtest/sessions/${session.id}/report-export?format=md`}
+        download
+        class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
+      >
+        Scarica .md
+      </a>
+      <button
+        id="save-to-drive-btn"
+        class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan"
+      >
+        Salva su Drive
+      </button>
+      <button id="print-pdf-btn" type="button" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white shadow hover:-translate-y-0.5 transition">
+        Stampa / PDF
+      </button>
+    </div>
+  </div>
+
+  <script is:inline>
+    // Prima di stampare apre tutti i <details> (storico turni, dettaglio
+    // checklist, dettagli gradimento) cosi' il PDF e' completo. Dopo la
+    // stampa ripristina lo stato originale.
+    (function () {
+      const btn = document.getElementById("print-pdf-btn");
+      const savedStates = new WeakMap();
+      function expandAllDetails() {
+        document.querySelectorAll("details").forEach((d) => {
+          savedStates.set(d, d.open);
+          d.open = true;
+        });
+      }
+      function restoreDetails() {
+        document.querySelectorAll("details").forEach((d) => {
+          if (savedStates.has(d)) d.open = savedStates.get(d);
+        });
+      }
+      btn?.addEventListener("click", () => {
+        expandAllDetails();
+        // Doppio rAF per dare al layout il tempo di ricalcolarsi
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.print();
+        }));
+      });
+      // Anche Ctrl+P diretto del browser: hook su beforeprint
+      window.addEventListener("beforeprint", expandAllDetails);
+      window.addEventListener("afterprint", restoreDetails);
+    })();
+  </script>
+
+  <script is:inline define:vars={{ sessionId: session.id }}>
+    document.getElementById("save-to-drive-btn")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Salvando…";
+      try {
+        const r = await fetch(`/api/playtest/sessions/${sessionId}/report-export?target=drive`, { method: "POST" });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        btn.textContent = "✓ Salvato";
+        if (j.file?.webViewLink && confirm(`Report salvato su Drive come ${j.file.name}. Apri ora?`)) {
+          window.open(j.file.webViewLink, "_blank", "noopener");
+        }
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+      } catch (err) {
+        alert("Errore: " + err.message);
+        btn.textContent = orig;
+        btn.disabled = false;
+      }
+    });
+  </script>
+
+  <article class="mt-6 space-y-8 rounded-xl bg-white p-8 shadow-sm print:shadow-none print:p-0">
+    {/* === HEADER === */}
+    <header class="border-b border-nx-gray-light/30 pb-6">
+      <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">{game.name}</p>
+      <h2 class="mt-1 text-3xl font-black text-nx-dark">{session.label}</h2>
+      <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-nx-gray-dark">
+        {session.playedAt && <div><dt class="inline font-semibold">Data:</dt> <dd class="inline">{session.playedAt}</dd></div>}
+        {session.location && <div><dt class="inline font-semibold">Luogo:</dt> <dd class="inline">{session.location}</dd></div>}
+        <div><dt class="inline font-semibold">Giocatori:</dt> <dd class="inline">{players.length}</dd></div>
+        <div><dt class="inline font-semibold">Stato:</dt> <dd class="inline capitalize">{session.status}</dd></div>
+      </dl>
+      {collaborators.length > 0 && (
+        <div class="mt-3">
+          <p class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark">
+            {collaborators.length > 1 ? `Osservatori (${collaborators.length})` : "Osservatore"}
+          </p>
+          <ul class="mt-1 flex flex-wrap gap-2 text-xs">
+            {collaborators.map((c) => (
+              <li class="rounded-full bg-nx-off-white px-3 py-1">
+                <strong class="text-nx-dark">{c.name}</strong>
+                <span class="ml-2 text-nx-gray-dark">
+                  {c.contributions.turns > 0 && `${c.contributions.turns} turni`}
+                  {c.contributions.checklists > 0 && ` · ${c.contributions.checklists} checklist`}
+                  {c.contributions.observations > 0 && ` · ${c.contributions.observations} osserv.`}
+                  {c.contributions.omni > 0 && ` · ${c.contributions.omni} OMNI`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {hasMultiUserData && (
+            <p class="mt-2 rounded-md bg-nx-cyan-light/40 px-3 py-2 text-xs text-nx-dark">
+              <strong>Dati multi-osservatore unificati:</strong> quando più osservatori hanno cronometrato lo stesso turno
+              o compilato la stessa checklist, i tempi e i punteggi sono mediati. I commenti vengono uniti con attribuzione.
+            </p>
+          )}
+        </div>
+      )}
+    </header>
+
+    {/* === KPI === */}
+    <section class="grid gap-3 sm:grid-cols-4">
+      <div class="rounded-lg bg-nx-off-white p-4 text-center">
+        <p class="text-[10px] uppercase text-nx-gray-dark">Tempo turni</p>
+        <p class="mt-1 text-2xl font-black text-nx-cyan">{totalMinutes.toFixed(1)} min</p>
+      </div>
+      <div class="rounded-lg bg-nx-off-white p-4 text-center">
+        <p class="text-[10px] uppercase text-nx-gray-dark">Tempo totale</p>
+        <p class="mt-1 text-2xl font-black text-nx-cyan">{grandTotalMin.toFixed(1)} min</p>
+        <p class="text-[10px] text-nx-gray-dark">incl. set-up</p>
+      </div>
+      <div class="rounded-lg bg-nx-off-white p-4 text-center">
+        <p class="text-[10px] uppercase text-nx-gray-dark">Turni totali</p>
+        <p class="mt-1 text-2xl font-black text-nx-cyan">{turns.length}</p>
+        <p class="text-[10px] text-nx-gray-dark">media {fmtSec(avgTurnSec)}</p>
+      </div>
+      <div class="rounded-lg bg-nx-off-white p-4 text-center">
+        <p class="text-[10px] uppercase text-nx-gray-dark">Gradimento</p>
+        <p class="mt-1 text-2xl font-black text-nx-cyan">
+          {gradimento.mean != null ? gradimento.mean.toFixed(2) : "—"}
+        </p>
+        <p class="text-[10px] text-nx-gray-dark">
+          {gradimento.n > 0 ? `n=${gradimento.n}${gradimento.sd != null ? ` · SD ${gradimento.sd.toFixed(2)}` : ""}` : "nessuna risposta"}
+        </p>
+      </div>
+    </section>
+
+    {/* === GRADIMENTO DETAIL === */}
+    {gradimento.n > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Gradimento — dettagli</h3>
+        <p class="text-xs text-nx-gray-dark">
+          {gradimento.n} risposte. Scala 1-7 con item invertiti già corretti (più alto = meglio).
+          {gradimento.perceivedMinutes.mean != null && (
+            <> Durata percepita media: <strong>{gradimento.perceivedMinutes.mean.toFixed(0)} min</strong> ({gradimento.perceivedMinutes.n} risp.).</>
+          )}
+        </p>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-sm font-semibold text-nx-cyan">Vedi medie per item</summary>
+          <table class="mt-3 w-full text-xs">
+            <thead>
+              <tr class="bg-nx-off-white uppercase text-nx-gray-dark">
+                <th class="px-2 py-1.5 text-left">Item</th>
+                <th class="px-2 py-1.5 text-right">Media (corr.)</th>
+                <th class="px-2 py-1.5 text-right">N risp.</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-nx-gray-light/20">
+              {Object.entries(gradimento.perItem).map(([k, v]) => (
+                <tr>
+                  <td class="px-2 py-1.5"><code>{k}</code>{k.endsWith("_r") && <span class="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">REV</span>}</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-nx-cyan">{v.mean.toFixed(2)}</td>
+                  <td class="px-2 py-1.5 text-right text-nx-gray-dark">{v.n}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      </section>
+    )}
+
+    {/* === SINTESI NARRATIVA === */}
+    {report.narrative_summary && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Sintesi</h3>
+        <p class="mt-2 whitespace-pre-line text-nx-dark leading-relaxed">{report.narrative_summary}</p>
+      </section>
+    )}
+
+    {/* === CRITICITÀ === */}
+    {report.criticita && report.criticita.length > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Criticità → Soluzioni proposte</h3>
+        <div class="mt-3 divide-y divide-nx-gray-light/30 rounded-lg border border-nx-gray-light/30">
+          <div class="grid grid-cols-2 bg-nx-off-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            <span>Problema</span><span>Soluzione</span>
+          </div>
+          {report.criticita.map((e) => (
+            <div class="grid grid-cols-2 gap-4 px-4 py-3 text-sm">
+              <p class="text-nx-dark">{e.problema}</p>
+              <p class="text-nx-cyan">{e.soluzione || "—"}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {/* === COSE POCO CHIARE === */}
+    {report.cose_poco_chiare && report.cose_poco_chiare.length > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Cose poco chiare → Soluzioni proposte</h3>
+        <div class="mt-3 divide-y divide-nx-gray-light/30 rounded-lg border border-nx-gray-light/30">
+          <div class="grid grid-cols-2 bg-nx-off-white px-4 py-2 text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            <span>Questione</span><span>Soluzione</span>
+          </div>
+          {report.cose_poco_chiare.map((e) => (
+            <div class="grid grid-cols-2 gap-4 px-4 py-3 text-sm">
+              <p class="text-nx-dark">{e.problema}</p>
+              <p class="text-nx-cyan">{e.soluzione || "—"}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {/* === STATS GIOCATORI / SQUADRE === */}
+    {isTeamGame && teamStats.length > 0 ? (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Punteggio squadre</h3>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {teamStats.map((ts) => (
+            <div class="rounded-lg border border-nx-gray-light/30 p-4">
+              <p class="text-sm font-bold uppercase tracking-wider text-nx-dark">{ts.team.name}</p>
+              <p class="mt-1 text-3xl font-black text-nx-cyan">{ts.total}</p>
+              <p class="text-[11px] text-nx-gray-dark">{ts.players.length} giocator{ts.players.length === 1 ? "e" : "i"}: {ts.players.map((p) => p.displayName).join(", ") || "—"}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    ) : playerStats.length > 0 ? (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Classifica giocatori</h3>
+        <table class="mt-3 w-full text-sm">
+          <thead>
+            <tr class="bg-nx-off-white text-xs uppercase text-nx-gray-dark">
+              <th class="px-3 py-2 text-left">Pos</th>
+              <th class="px-3 py-2 text-left">Giocatore</th>
+              <th class="px-3 py-2 text-right">Punti</th>
+              <th class="px-3 py-2 text-right">Turni</th>
+              <th class="px-3 py-2 text-right">Tempo giocato</th>
+              <th class="px-3 py-2 text-right">Downtime</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-nx-gray-light/20">
+            {playerStats.map((s, i) => (
+              <tr>
+                <td class="px-3 py-2 font-mono text-nx-gray-dark">{i + 1}</td>
+                <td class="px-3 py-2"><strong class="text-nx-dark">{s.p.displayName}</strong>{s.p.role && <span class="text-xs text-nx-gray-dark"> · {s.p.role}</span>}</td>
+                <td class="px-3 py-2 text-right font-mono text-nx-cyan">{s.points}</td>
+                <td class="px-3 py-2 text-right text-nx-gray-dark">{s.turns}</td>
+                <td class="px-3 py-2 text-right font-mono">{fmtSec(s.playSec)}</td>
+                <td class="px-3 py-2 text-right font-mono text-nx-gray-dark">{fmtSec(s.downtimeSec)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    ) : null}
+
+    {/* === CHECKLIST AGGREGATES === */}
+    {categoryAvgs.length > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Checklist osservativa — medie</h3>
+        <p class="text-xs text-nx-gray-dark">Score medio per categoria (0–10) attraverso tutte le istanze (Inizio, Fine, Partecipata).</p>
+        <div class="mt-3 grid gap-2 sm:grid-cols-2">
+          {categoryAvgs.map((c) => (
+            <div class="flex items-center justify-between rounded-md border border-nx-gray-light/30 px-3 py-2">
+              <span class="text-sm text-nx-dark">{c.category}</span>
+              <span class="font-mono text-nx-cyan">{c.avg.toFixed(1)} / 10</span>
+            </div>
+          ))}
+        </div>
+
+        <details class="mt-4">
+          <summary class="cursor-pointer text-sm font-semibold text-nx-cyan">Vedi dettaglio per item</summary>
+          <table class="mt-3 w-full text-xs">
+            <thead>
+              <tr class="bg-nx-off-white uppercase text-nx-gray-dark">
+                <th class="px-2 py-1.5 text-left">Categoria</th>
+                <th class="px-2 py-1.5 text-left">Item</th>
+                <th class="px-2 py-1.5 text-right">Media</th>
+                <th class="px-2 py-1.5 text-left">Commenti</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-nx-gray-light/20">
+              {itemAvgList.map((x) => (
+                <tr>
+                  <td class="px-2 py-1.5 text-nx-gray-dark">{x.item.category}{x.item.subcategory ? ` · ${x.item.subcategory}` : ""}</td>
+                  <td class="px-2 py-1.5">{x.item.text}</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-nx-cyan">{x.n > 0 ? (x.sum / x.n).toFixed(1) : "—"}</td>
+                  <td class="px-2 py-1.5 text-[11px] italic text-nx-gray-dark">{x.comments.map((c) => `[${c.phase}] ${c.text}`).join(" · ") || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      </section>
+    )}
+
+    {/* === TABELLA OMNI === */}
+    {omniComments.length > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Tavola OMNI</h3>
+        <p class="text-xs text-nx-gray-dark">Commenti verbatim dei giocatori dal debriefing.</p>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {(["ottimo", "modificare", "non_chiaro", "idee_nuove"] as const).map((cat) => (
+            <div class="rounded-lg border border-nx-gray-light/30 p-3">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-nx-cyan">{omniLabels[cat]}</h4>
+              <ul class="mt-2 space-y-1.5 text-xs">
+                {omniByCat[cat].length === 0 ? <li class="italic text-nx-gray-dark">—</li> :
+                  omniByCat[cat].map((o) => (
+                    <li class="rounded bg-nx-off-white px-2 py-1">
+                      <span>{o.text}</span>
+                      {o.authorName && <span class="block text-[10px] text-nx-gray-dark">— {o.authorName}</span>}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {/* === SEMPRE SOTTOCCHIO === */}
+    {observations.length > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Sempre sottocchio</h3>
+        <p class="text-xs text-nx-gray-dark">Annotazioni live dell'osservatore durante la partita.</p>
+        <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {(["variabili_visibili", "variabili_invisibili", "equita", "lamentele"] as const).map((cat) => (
+            <div class="rounded-lg border border-nx-gray-light/30 p-3">
+              <h4 class="text-xs font-bold uppercase tracking-wider text-nx-cyan">{obsLabels[cat]}</h4>
+              <ul class="mt-2 space-y-1.5 text-xs">
+                {obsByCat[cat].length === 0 ? <li class="italic text-nx-gray-dark">—</li> :
+                  obsByCat[cat].map((o) => (
+                    <li class="rounded bg-nx-off-white px-2 py-1">{o.text}</li>
+                  ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {/* === FASI SPECIALI === */}
+    {phaseTimes.length > 0 && (
+      <section>
+        <h3 class="text-lg font-bold text-nx-dark">Fasi speciali</h3>
+        <ul class="mt-2 space-y-1 text-sm">
+          {phaseTimes.map((p) => (
+            <li class="flex items-center justify-between rounded-md border border-nx-gray-light/30 px-3 py-1.5">
+              <span><strong>{p.name}</strong></span>
+              <span class="font-mono text-nx-cyan">{p.minutes} min</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    {/* === STORICO TURNI (consenso multi-osservatore) === */}
+    {mergedTurns.length > 0 && (
+      <section>
+        <details>
+          <summary class="cursor-pointer text-lg font-bold text-nx-dark">
+            Storico turni (consenso multi-osservatore)
+          </summary>
+          {hasMultiUserData && (
+            <p class="mt-2 text-xs text-nx-gray-dark">
+              I valori sono mediati tra gli osservatori. Il numero in
+              <strong> "osserv."</strong> indica quanti hanno registrato quel turno.
+            </p>
+          )}
+          <div class="mt-3 space-y-3 text-xs">
+            {Array.from(mergedByRound.entries()).map(([round, list]) => (
+              <div>
+                <h4 class="text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Round {round}</h4>
+                <table class="mt-1 w-full">
+                  <thead>
+                    <tr class="bg-nx-off-white text-nx-gray-dark">
+                      <th class="px-2 py-1 text-left">Giocatore</th>
+                      <th class="px-2 py-1 text-right">Durata</th>
+                      <th class="px-2 py-1 text-right">Punti</th>
+                      <th class="px-2 py-1 text-left">Evento</th>
+                      <th class="px-2 py-1 text-right">Osserv.</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-nx-gray-light/20">
+                    {list.map((m) => {
+                      const p = players.find((pp) => pp.id === m.playerId);
+                      let pts = "";
+                      if (isTeamGame && m.avgTeamPoints) {
+                        pts = m.avgTeamPoints.map((v, i) => `${teams[i]?.name ?? "S" + (i + 1)}:${v.toFixed(1)}`).join(" · ");
+                      } else if (m.avgPoints1 != null || m.avgPoints2 != null) {
+                        pts = `${(m.avgPoints1 ?? 0).toFixed(m.recordersCount > 1 ? 1 : 0)}${m.avgPoints2 != null ? " / " + (m.avgPoints2 ?? 0).toFixed(m.recordersCount > 1 ? 1 : 0) : ""}`;
+                      }
+                      return (
+                        <tr class={m.recordersCount > 1 ? "bg-nx-cyan-light/20" : ""}>
+                          <td class="px-2 py-1">{p?.displayName ?? "?"}</td>
+                          <td class="px-2 py-1 text-right font-mono">{fmtSec(m.avgDurationSeconds)}</td>
+                          <td class="px-2 py-1 text-right font-mono text-nx-cyan">{pts}</td>
+                          <td class="px-2 py-1 italic text-nx-gray-dark">{m.events.join("; ")}</td>
+                          <td class="px-2 py-1 text-right font-mono text-nx-gray-dark">{m.recordersCount}×</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </details>
+      </section>
+    )}
+
+    <footer class="border-t border-nx-gray-light/30 pt-4 text-center text-[10px] text-nx-gray-dark">
+      Report generato il {new Date().toLocaleDateString("it-IT")} · NexLudica APS · playtest.nexludica.org
+    </footer>
+  </article>
+
+  <style is:global>
+    @media print {
+      /* Pagina A4 con margini ridotti — il browser aggiunge il proprio header/footer
+         (data, URL, n. pagina): l'utente puo' rimuoverli dal dialog di stampa. */
+      @page {
+        size: A4 portrait;
+        margin: 14mm 12mm;
+      }
+
+      /* Preserva colori dei tag (badge, KPI, accenti cyan) anche su B&W defaults */
+      *, *::before, *::after {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      html, body {
+        background: #fff !important;
+        font-size: 10pt;
+        color: #1b2528;
+      }
+
+      /* === Nasconde il "chrome" del PlaytestLayout ===
+         Quando si stampa il report vogliamo solo l'<article>, non
+         header/breadcrumb/footer del layout. */
+      body > header,
+      body > footer,
+      .print\:hidden {
+        display: none !important;
+      }
+      /* Niente padding/maxwidth sul <main>: l'<article> usa l'intera pagina */
+      body > main {
+        max-width: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      /* L'<article> contenitore: niente shadow ne' background card */
+      article {
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: transparent !important;
+      }
+
+      /* Header report (titolo + metadata) */
+      article > header {
+        border-bottom: 2px solid #05abc4 !important;
+        padding-bottom: 8pt !important;
+        margin-bottom: 12pt !important;
+      }
+      article > header h2 { font-size: 20pt !important; margin: 2pt 0 !important; }
+      article > header p { font-size: 9pt !important; }
+      article > header dl { font-size: 9pt !important; gap: 4pt 18pt !important; }
+
+      /* Sezioni: ognuna inizia "stretta", evita di spezzare a meta' */
+      section {
+        margin-top: 10pt !important;
+        margin-bottom: 0 !important;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      section > h3 {
+        font-size: 13pt !important;
+        margin: 0 0 4pt !important;
+        padding-bottom: 2pt;
+        border-bottom: 1px solid #b4b4b4;
+        break-after: avoid;
+        page-break-after: avoid;
+      }
+
+      /* === <details>: forzato aperto, niente freccia ===
+         Sul web ci sono <details>/<summary> per nascondere dettagli; in
+         stampa vogliamo TUTTO espanso, altrimenti il PDF e' incompleto. */
+      details {
+        display: block !important;
+      }
+      details > summary {
+        list-style: none !important;
+        cursor: default !important;
+        display: block;
+        font-size: 13pt !important;
+        font-weight: 700;
+        color: #1b2528 !important;
+        margin: 0 0 4pt !important;
+        padding-bottom: 2pt;
+        border-bottom: 1px solid #b4b4b4;
+        break-after: avoid;
+        page-break-after: avoid;
+      }
+      details > summary::-webkit-details-marker,
+      details > summary::marker {
+        display: none !important;
+        content: "" !important;
+      }
+      details[open] > *,
+      details:not([open]) > * {
+        display: revert !important;
+      }
+      details:not([open]) > summary ~ * {
+        display: revert !important;
+      }
+
+      /* === KPI cards: grid a 4 col anche su stampa === */
+      section.grid.sm\:grid-cols-4 {
+        display: grid !important;
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 6pt !important;
+      }
+      section.grid.sm\:grid-cols-4 > div {
+        padding: 6pt !important;
+        background: #f8fafb !important;
+        border: 0.5pt solid #b4b4b4 !important;
+        border-radius: 4pt;
+      }
+      section.grid.sm\:grid-cols-4 p:nth-child(2) { font-size: 14pt !important; }
+
+      /* === OMNI / Sempre sottocchio: forziamo 4 colonne === */
+      .grid.lg\:grid-cols-4 {
+        display: grid !important;
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 4pt !important;
+      }
+      .grid.lg\:grid-cols-4 > div {
+        padding: 4pt 6pt !important;
+        border: 0.5pt solid #b4b4b4 !important;
+        border-radius: 4pt;
+        background: #fff !important;
+      }
+      .grid.lg\:grid-cols-4 h4 {
+        font-size: 9pt !important;
+        margin-bottom: 3pt;
+        padding-bottom: 2pt;
+        border-bottom: 0.5pt solid #05abc4;
+      }
+      .grid.lg\:grid-cols-4 ul { padding-left: 0 !important; }
+      .grid.lg\:grid-cols-4 li {
+        font-size: 8.5pt !important;
+        margin: 2pt 0 !important;
+        padding: 2pt 3pt !important;
+        background: #f8fafb !important;
+        list-style: none !important;
+      }
+
+      /* === Tabelle: piu' compatte === */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 9pt !important;
+        margin-top: 4pt;
+      }
+      thead tr { background: #f8fafb !important; }
+      th, td {
+        padding: 3pt 5pt !important;
+        border-bottom: 0.5pt solid #e0e0e0;
+      }
+      thead th {
+        font-size: 8pt !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #657179;
+      }
+
+      /* === Storico turni: tabelle round-by-round impilate === */
+      details h4 {
+        font-size: 8pt !important;
+        margin-top: 6pt;
+        color: #657179;
+      }
+
+      /* === Criticita' / Cose poco chiare: due colonne === */
+      .grid.grid-cols-2 {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 6pt !important;
+      }
+      .grid.grid-cols-2 > * {
+        padding: 4pt 6pt !important;
+        font-size: 9pt !important;
+      }
+
+      /* === Player stats === */
+      .grid.sm\:grid-cols-2.lg\:grid-cols-3 {
+        display: grid !important;
+        grid-template-columns: repeat(3, 1fr) !important;
+        gap: 6pt !important;
+      }
+
+      /* Checklist medie per categoria */
+      .grid.sm\:grid-cols-2 {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 4pt !important;
+      }
+
+      /* === Tipografia generale === */
+      p, li {
+        font-size: 9.5pt !important;
+        line-height: 1.4 !important;
+      }
+      h3, h4 { color: #1b2528 !important; }
+
+      /* Accenti cyan: tieni il colore stampato */
+      .text-nx-cyan, .text-nx-cyan * {
+        color: #05abc4 !important;
+      }
+      .text-nx-gray-dark { color: #657179 !important; }
+
+      /* Link: niente sottolineatura, niente URL stampato */
+      a[href]:after { content: "" !important; }
+      a { color: inherit !important; text-decoration: none !important; }
+
+      /* Footer del report (data) — visibile, piccolo */
+      article > footer {
+        margin-top: 12pt !important;
+        padding-top: 4pt !important;
+        border-top: 0.5pt solid #b4b4b4 !important;
+        font-size: 7.5pt !important;
+        color: #657179 !important;
+      }
+
+      /* Evita orfani / vedove */
+      h1, h2, h3, h4, h5 {
+        break-after: avoid;
+        page-break-after: avoid;
+      }
+      tr, li {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</PlaytestLayout>

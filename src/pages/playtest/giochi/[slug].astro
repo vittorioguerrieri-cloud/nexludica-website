@@ -1,0 +1,797 @@
+---
+/**
+ * Pagina di dettaglio di un gioco: sessioni + configurazione procedura.
+ */
+import PlaytestLayout from "../../../layouts/PlaytestLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import {
+  getGameBySlug,
+  listSessions,
+  listGameFiles,
+  type Game,
+  type GameFile,
+  type Session,
+} from "../../../server/playtest";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) {
+  const nextUrl = encodeURIComponent(new URL(Astro.request.url).toString());
+  return Astro.redirect(`https://nexludica.org/login?next=${nextUrl}`);
+}
+
+const { slug } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+
+let game: Game | null = null;
+let sessions: Session[] = [];
+let files: GameFile[] = [];
+if (db && slug) {
+  game = await getGameBySlug(db, String(slug));
+  if (game) {
+    sessions = await listSessions(db, game.id);
+    files = await listGameFiles(db, game.id);
+  }
+}
+
+if (!game) {
+  return new Response("Gioco non trovato", { status: 404 });
+}
+
+function statusBadge(s: Session["status"]): { label: string; cls: string } {
+  switch (s) {
+    case "in_progress": return { label: "In corso", cls: "bg-amber-100 text-amber-700" };
+    case "completed":   return { label: "Completata", cls: "bg-emerald-100 text-emerald-700" };
+    case "archived":    return { label: "Archiviata", cls: "bg-nx-gray-light/40 text-nx-gray-dark" };
+    default:            return { label: "Pianificata", cls: "bg-sky-100 text-sky-700" };
+  }
+}
+const cfg = game.procedureConfig;
+---
+
+<PlaytestLayout
+  title={`${game.name} — Playtest`}
+  crumbs={[{ label: game.name }]}
+>
+  <section class="rounded-xl bg-white p-6 shadow-sm">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0">
+        <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Gioco</p>
+        <h1 class="mt-2 text-3xl font-black tracking-tight text-nx-dark sm:text-4xl" style="font-family: var(--font-display);">
+          {game.name}
+        </h1>
+        {game.shortDescription && (
+          <p class="mt-2 text-nx-gray-dark">{game.shortDescription}</p>
+        )}
+        <dl class="mt-4 flex flex-wrap gap-x-6 gap-y-1 text-sm text-nx-gray-dark">
+          {game.designers && <div><dt class="inline font-semibold">Design:</dt> <dd class="inline">{game.designers}</dd></div>}
+          {(game.playersMin || game.playersMax) && (
+            <div><dt class="inline font-semibold">Giocatori:</dt> <dd class="inline">{game.playersMin ?? "?"}–{game.playersMax ?? "?"}</dd></div>
+          )}
+          {(game.durationMinMinutes || game.durationMaxMinutes) && (
+            <div><dt class="inline font-semibold">Durata:</dt> <dd class="inline">{game.durationMinMinutes ?? "?"}–{game.durationMaxMinutes ?? "?"} min</dd></div>
+          )}
+          {game.minAge && <div><dt class="inline font-semibold">Età:</dt> <dd class="inline">{game.minAge}+</dd></div>}
+        </dl>
+      </div>
+      <div class="flex flex-col items-end gap-2">
+        <button
+          id="new-session-btn"
+          class="rounded-md bg-nx-cyan px-4 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg"
+        >
+          + Nuova sessione
+        </button>
+        <button
+          id="edit-info-btn"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan"
+        >
+          ✎ Modifica scheda
+        </button>
+        <a
+          href={`/giochi/${game.slug}/checklist`}
+          class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
+        >
+          ✎ Modifica checklist
+        </a>
+        <a
+          href={`/stampa/omni?game=${game.slug}&n=4`}
+          target="_blank"
+          rel="noopener"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
+        >
+          Stampa tavole OMNI
+        </a>
+      </div>
+    </div>
+    {game.description && (
+      <div class="mt-5 border-t border-nx-gray-light/20 pt-4">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Descrizione</h2>
+        <p class="mt-2 whitespace-pre-line text-sm leading-relaxed text-nx-dark">{game.description}</p>
+      </div>
+    )}
+  </section>
+
+  {/* === FILES SECTION === */}
+  <section class="mt-6 rounded-xl bg-white p-6 shadow-sm">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h2 class="text-xl font-bold text-nx-dark">File del gioco</h2>
+        <p class="mt-1 text-xs text-nx-gray-dark">
+          Regole, dossier di design, asset grafici. Caricati su Google Drive nella cartella dedicata al gioco.
+        </p>
+      </div>
+      <label class="cursor-pointer rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+        + Carica file
+        <input id="file-input" type="file" class="hidden" />
+      </label>
+    </div>
+
+    <div id="upload-status" class="mt-3 hidden rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800"></div>
+
+    <ul id="files-list" class="mt-4 divide-y divide-nx-gray-light/20">
+      {files.length === 0 ? (
+        <li id="files-empty" class="py-6 text-center text-sm text-nx-gray-dark">
+          Nessun file caricato. Inizia con il rulebook o il dossier di design.
+        </li>
+      ) : (
+        files.map((f) => (
+          <li class="flex flex-wrap items-center justify-between gap-3 py-3" data-file-id={f.id}>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded bg-nx-cyan-light text-xs font-bold text-nx-cyan">
+                  {f.mimeType?.includes("pdf") ? "PDF" : f.mimeType?.includes("image") ? "IMG" : f.mimeType?.includes("word") || f.mimeType?.includes("document") ? "DOC" : "FILE"}
+                </span>
+                <a href={f.webViewLink ?? "#"} target="_blank" rel="noopener" class="truncate text-sm font-semibold text-nx-dark no-underline hover:text-nx-cyan">
+                  {f.name}
+                </a>
+                <span class="rounded-full bg-nx-off-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">
+                  {f.kind === "rules" ? "Regole" : f.kind === "design_doc" ? "Design doc" : f.kind === "asset" ? "Asset" : "Altro"}
+                </span>
+              </div>
+              {f.description && <p class="mt-1 text-xs text-nx-gray-dark">{f.description}</p>}
+              <p class="mt-0.5 text-[11px] text-nx-gray-dark">
+                {f.sizeBytes ? `${(f.sizeBytes / 1024).toFixed(0)} KB` : ""}
+                {f.uploadedAt && ` · caricato il ${new Date(f.uploadedAt).toLocaleDateString("it-IT")}`}
+              </p>
+            </div>
+            <button data-del-file={f.id} class="text-xs font-semibold text-red-500 hover:text-red-700">Rimuovi</button>
+          </li>
+        ))
+      )}
+    </ul>
+  </section>
+
+  <div class="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+    <section>
+      <h2 class="text-xl font-bold text-nx-dark">Sessioni di playtest</h2>
+      {sessions.length === 0 ? (
+        <div class="mt-4 rounded-lg border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
+          Nessuna sessione ancora. Crea la prima per iniziare a raccogliere dati.
+        </div>
+      ) : (
+        <ul class="mt-4 space-y-3">
+          {sessions.map((s) => {
+            const b = statusBadge(s.status);
+            return (
+              <li class="relative">
+                <a href={`/sessioni/${s.id}`} class="block rounded-lg border border-nx-gray-light/20 bg-white p-4 pr-12 no-underline transition hover:-translate-y-0.5 hover:border-nx-cyan hover:shadow-md">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <p class="font-bold text-nx-dark">{s.label}</p>
+                    <span class={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${b.cls}`}>{b.label}</span>
+                  </div>
+                  <dl class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-nx-gray-dark">
+                    {s.playedAt && <div><dt class="inline font-semibold">Data:</dt> <dd class="inline">{s.playedAt}</dd></div>}
+                    {s.location && <div><dt class="inline font-semibold">Luogo:</dt> <dd class="inline">{s.location}</dd></div>}
+                    {s.totalMinutes != null && <div><dt class="inline font-semibold">Durata:</dt> <dd class="inline">{Math.round(s.totalMinutes)} min</dd></div>}
+                    {s.flowScore != null && <div><dt class="inline font-semibold">Flow:</dt> <dd class="inline">{s.flowScore.toFixed(2)}</dd></div>}
+                  </dl>
+                </a>
+                {/* Kebab menu (3 punti verticali) — gestisce rinomina/archivia/elimina */}
+                <div class="nx-session-menu absolute right-2 top-2"
+                  data-session-id={s.id}
+                  data-session-label={s.label}
+                  data-session-status={s.status}>
+                  <button type="button" data-kebab
+                    aria-label="Azioni sessione"
+                    class="flex h-8 w-8 items-center justify-center rounded-full text-lg text-nx-gray-dark hover:bg-nx-off-white hover:text-nx-cyan">
+                    ⋮
+                  </button>
+                  <div data-kebab-menu class="absolute right-0 top-9 z-10 hidden w-44 overflow-hidden rounded-lg border border-nx-gray-light/30 bg-white shadow-lg">
+                    <a href={`/sessioni/${s.id}`} class="block px-3 py-2 text-sm text-nx-dark no-underline hover:bg-nx-off-white">
+                      <span class="inline-block w-5">↗</span> Apri
+                    </a>
+                    <a href={`/sessioni/${s.id}/report`} class="block px-3 py-2 text-sm text-nx-dark no-underline hover:bg-nx-off-white">
+                      <span class="inline-block w-5">▤</span> Report
+                    </a>
+                    <hr class="my-1 border-nx-gray-light/30" />
+                    <button type="button" data-action="rename" class="flex w-full items-center px-3 py-2 text-left text-sm text-nx-dark hover:bg-nx-off-white">
+                      <span class="inline-block w-5">✎</span> Rinomina
+                    </button>
+                    {s.status !== "archived" ? (
+                      <button type="button" data-action="archive" class="flex w-full items-center px-3 py-2 text-left text-sm text-nx-dark hover:bg-nx-off-white">
+                        <span class="inline-block w-5">▣</span> Archivia
+                      </button>
+                    ) : (
+                      <button type="button" data-action="unarchive" class="flex w-full items-center px-3 py-2 text-left text-sm text-nx-dark hover:bg-nx-off-white">
+                        <span class="inline-block w-5">↺</span> Ripristina
+                      </button>
+                    )}
+                    <hr class="my-1 border-nx-gray-light/30" />
+                    <button type="button" data-action="delete" class="flex w-full items-center px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50">
+                      <span class="inline-block w-5">×</span> Elimina
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+
+    <aside class="space-y-6">
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Procedura</h3>
+        <p class="mt-1 text-xs text-nx-gray-dark">Tool e fasi abilitati per ogni sessione.</p>
+
+        <form id="cfg-form" class="mt-4 space-y-3">
+          <fieldset>
+            <legend class="text-[11px] font-bold uppercase tracking-wider text-nx-gray-dark">Fasi checklist</legend>
+            <div class="mt-2 space-y-1">
+              {(["setup", "inizio", "fine", "partecipata"] as const).map((p) => (
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="checkbox" name="phase" value={p} checked={cfg.phases?.includes(p)} class="rounded text-nx-cyan focus:ring-nx-cyan" />
+                  <span class="capitalize">{p}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend class="text-[11px] font-bold uppercase tracking-wider text-nx-gray-dark">Moduli attivi</legend>
+            <div class="mt-2 space-y-1">
+              {([
+                ["timer", "Cronometro turni"],
+                ["checklist", "Checklist osservativa"],
+                ["omni", "OMNI (debrief)"],
+                ["observations", "Sempre sottocchio"],
+              ] as const).map(([k, label]) => (
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="checkbox" name="module" value={k} checked={cfg.modules?.includes(k)} class="rounded text-nx-cyan focus:ring-nx-cyan" />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend class="text-[11px] font-bold uppercase tracking-wider text-nx-gray-dark">Modalità punti</legend>
+            <div class="mt-2 space-y-1.5">
+              <label class="flex items-center gap-2 text-sm">
+                <input type="radio" name="team_mode" value="individual" checked={!cfg.is_team_game} class="text-nx-cyan focus:ring-nx-cyan" />
+                <span>Individuale (punti per giocatore)</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm">
+                <input type="radio" name="team_mode" value="teams" checked={!!cfg.is_team_game} class="text-nx-cyan focus:ring-nx-cyan" />
+                <span>A squadre (2 squadre)</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset id="indiv-labels" class={cfg.is_team_game ? "hidden" : ""}>
+            <legend class="text-[11px] font-bold uppercase tracking-wider text-nx-gray-dark">Etichette punti (individuale)</legend>
+            <div class="mt-2 grid grid-cols-2 gap-2">
+              <input name="p1" type="text" maxlength="20" value={cfg.points_label_1 ?? "Punti 1"}
+                placeholder="Es. Punti"
+                class="rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+              <input name="p2" type="text" maxlength="20" value={cfg.points_label_2 ?? "Punti 2"}
+                placeholder="Es. Risorse"
+                class="rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+            </div>
+            <p class="mt-1 text-[10px] text-nx-gray-dark">Due colonne opzionali per categorie di punti diverse (es. VP / Oro). Lascia vuota la seconda se non serve.</p>
+          </fieldset>
+
+          <fieldset id="team-labels" class={!cfg.is_team_game ? "hidden" : ""}>
+            <legend class="text-[11px] font-bold uppercase tracking-wider text-nx-gray-dark">Squadre</legend>
+            <ul id="teams-edit" class="mt-2 space-y-1.5">
+              {(cfg.teams ?? [{ name: "Squadra A" }, { name: "Squadra B" }]).map((t, i) => (
+                <li class="flex items-center gap-2" data-team-row>
+                  <span class="w-5 text-center text-xs font-mono text-nx-gray-dark">{i + 1}.</span>
+                  <input type="text" maxlength="30" value={t.name} data-team-name
+                    class="flex-1 rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+                  <button type="button" data-remove-team class="rounded p-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-700" title="Rimuovi squadra">×</button>
+                </li>
+              ))}
+            </ul>
+            <button type="button" id="add-team" class="mt-2 w-full rounded-md border border-dashed border-nx-cyan/40 px-2 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light">
+              + Aggiungi squadra
+            </button>
+            <p class="mt-2 text-[10px] text-nx-gray-dark">
+              Min 2, max 12 squadre. Le squadre possono avere un numero diverso di giocatori
+              (assegnazione libera). Lascia almeno 2 squadre attive.
+            </p>
+          </fieldset>
+
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="track_experience" checked={cfg.track_experience !== false} class="rounded text-nx-cyan focus:ring-nx-cyan" />
+            <span>Tag esperienza (Nuovo/Esperto)</span>
+          </label>
+
+          <button type="submit" class="w-full rounded-md bg-nx-dark px-3 py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-nx-cyan">
+            Salva procedura
+          </button>
+          <p id="cfg-msg" class="hidden text-xs"></p>
+        </form>
+      </div>
+
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Stato gioco</h3>
+        <p class="mt-1 text-xs text-nx-gray-dark">Attualmente: <strong class="text-nx-dark capitalize">{game.status}</strong></p>
+        <button id="toggle-status" data-status={game.status}
+          class="mt-3 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan">
+          {game.status === "archived" ? "Riattiva" : "Archivia"}
+        </button>
+      </div>
+    </aside>
+  </div>
+
+  {/* === EDIT INFO MODAL === */}
+  <div id="info-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-xl font-bold text-nx-dark">Scheda gioco</h2>
+      <p class="mt-1 text-xs text-nx-gray-dark">Tutte le info principali. Modificabile in ogni momento.</p>
+      <form id="info-form" class="mt-5 space-y-4">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Nome *</label>
+          <input name="name" required maxlength="80" value={game.name}
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Descrizione breve</label>
+          <input name="shortDescription" maxlength="200" value={game.shortDescription ?? ""}
+            placeholder="Una riga che descrive il gioco"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Descrizione lunga</label>
+          <textarea name="description" rows="5" placeholder="Tema, meccaniche principali, note di design, contesto…"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">{game.description ?? ""}</textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Game designer / autori</label>
+          <input name="designers" maxlength="200" value={game.designers ?? ""}
+            placeholder="es. V. Guerrieri, D. Aurelio, L. Caloi"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Giocatori (min)</label>
+            <input name="playersMin" type="number" min="1" max="20" value={game.playersMin ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Giocatori (max)</label>
+            <input name="playersMax" type="number" min="1" max="20" value={game.playersMax ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Durata min (min)</label>
+            <input name="durationMinMinutes" type="number" min="1" max="600" value={game.durationMinMinutes ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Durata max (min)</label>
+            <input name="durationMaxMinutes" type="number" min="1" max="600" value={game.durationMaxMinutes ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Età minima</label>
+            <input name="minAge" type="number" min="3" max="99" value={game.minAge ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+
+        <p id="info-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+
+        <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-4">
+          <button type="button" id="info-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+          <button type="submit" class="rounded-md bg-nx-cyan px-5 py-2 text-sm font-bold text-white">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* === UPLOAD METADATA MODAL === */}
+  <div id="upload-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-lg font-bold text-nx-dark">Caricamento file</h2>
+      <p id="upload-filename" class="mt-1 text-xs text-nx-gray-dark"></p>
+      <form id="upload-form" class="mt-4 space-y-3">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Tipo di file</label>
+          <select name="kind" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+            <option value="rules">Regole</option>
+            <option value="design_doc">Dossier di design</option>
+            <option value="asset">Asset grafico</option>
+            <option value="other" selected>Altro</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Note (opzionale)</label>
+          <input name="description" maxlength="200" placeholder="es. Rulebook v1.2, illustrazione copertina…"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <p id="upload-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"></p>
+        <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-3">
+          <button type="button" id="upload-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+          <button type="submit" id="upload-submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">Carica</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="session-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-xl font-bold text-nx-dark">Nuova sessione di playtest</h2>
+      <form id="session-form" class="mt-4 space-y-3">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="s-label">Etichetta *</label>
+          <input id="s-label" name="label" required maxlength="80" placeholder="es. PT 21/05/26 #1"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="s-date">Data</label>
+            <input id="s-date" name="playedAt" type="date"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="s-loc">Luogo</label>
+            <input id="s-loc" name="location" maxlength="80"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark" for="s-notes">Note</label>
+          <textarea id="s-notes" name="notes" rows="2"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+        </div>
+        <p id="s-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"></p>
+        <div class="mt-2 flex items-center justify-end gap-2">
+          <button type="button" id="s-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark no-underline hover:text-nx-cyan">Annulla</button>
+          <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">Crea sessione</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script is:inline define:vars={{ gameId: game.id }}>
+    // Modal nuova sessione
+    const modal = document.getElementById("session-modal");
+    const openModal = () => { modal.classList.remove("hidden"); modal.classList.add("flex"); document.getElementById("s-label").focus(); };
+    const closeModal = () => { modal.classList.add("hidden"); modal.classList.remove("flex"); };
+    document.getElementById("new-session-btn")?.addEventListener("click", openModal);
+    document.getElementById("s-cancel")?.addEventListener("click", closeModal);
+    modal?.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+
+    const sForm = document.getElementById("session-form");
+    sForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(sForm).entries());
+      const payload = {
+        label: String(data.label || "").trim(),
+        playedAt: String(data.playedAt || "") || null,
+        location: String(data.location || "").trim() || null,
+        notes: String(data.notes || "").trim() || null,
+      };
+      const err = document.getElementById("s-err");
+      err.classList.add("hidden");
+      try {
+        const r = await fetch(`/api/playtest/games/${gameId}/sessions`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        window.location.href = `/sessioni/${j.session.id}`;
+      } catch (e) { err.textContent = e.message; err.classList.remove("hidden"); }
+    });
+
+    // Procedura: salva config + toggle UI labels/team
+    const cfgForm = document.getElementById("cfg-form");
+    const cfgMsg = document.getElementById("cfg-msg");
+    const indivLabels = document.getElementById("indiv-labels");
+    const teamLabels = document.getElementById("team-labels");
+    cfgForm?.querySelectorAll('input[name="team_mode"]').forEach((r) => {
+      r.addEventListener("change", () => {
+        const isTeam = cfgForm.team_mode.value === "teams";
+        indivLabels.classList.toggle("hidden", isTeam);
+        teamLabels.classList.toggle("hidden", !isTeam);
+      });
+    });
+
+    // === Dynamic teams list (add / remove / rename) ===
+    const teamsEdit = document.getElementById("teams-edit");
+    const addTeamBtn = document.getElementById("add-team");
+    function renumberTeams() {
+      teamsEdit.querySelectorAll("[data-team-row]").forEach((row, i) => {
+        row.querySelector("span").textContent = `${i + 1}.`;
+      });
+      // Disabilita "Rimuovi" se restano solo 2 squadre
+      const rows = teamsEdit.querySelectorAll("[data-team-row]");
+      rows.forEach((row) => {
+        row.querySelector("[data-remove-team]").disabled = rows.length <= 2;
+        row.querySelector("[data-remove-team]").classList.toggle("opacity-30", rows.length <= 2);
+        row.querySelector("[data-remove-team]").classList.toggle("cursor-not-allowed", rows.length <= 2);
+      });
+      // Disabilita "+ Aggiungi" se ci sono 12 squadre
+      addTeamBtn.disabled = rows.length >= 12;
+      addTeamBtn.classList.toggle("opacity-50", rows.length >= 12);
+      addTeamBtn.classList.toggle("cursor-not-allowed", rows.length >= 12);
+    }
+    addTeamBtn?.addEventListener("click", () => {
+      const rows = teamsEdit.querySelectorAll("[data-team-row]");
+      if (rows.length >= 12) return;
+      const li = document.createElement("li");
+      li.className = "flex items-center gap-2";
+      li.dataset.teamRow = "";
+      li.innerHTML = `
+        <span class="w-5 text-center text-xs font-mono text-nx-gray-dark">${rows.length + 1}.</span>
+        <input type="text" maxlength="30" placeholder="Squadra ${rows.length + 1}" data-team-name
+          class="flex-1 rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+        <button type="button" data-remove-team class="rounded p-1 text-xs text-red-500 hover:bg-red-50 hover:text-red-700">×</button>`;
+      teamsEdit.appendChild(li);
+      li.querySelector("input")?.focus();
+      renumberTeams();
+    });
+    teamsEdit?.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-remove-team]");
+      if (!btn) return;
+      const rows = teamsEdit.querySelectorAll("[data-team-row]");
+      if (rows.length <= 2) return;
+      btn.closest("[data-team-row]").remove();
+      renumberTeams();
+    });
+    renumberTeams();
+
+    cfgForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(cfgForm);
+      const phases = fd.getAll("phase").map(String);
+      const modules = fd.getAll("module").map(String);
+      const isTeam = fd.get("team_mode") === "teams";
+      const teamRows = teamsEdit.querySelectorAll("[data-team-row]");
+      const teams = Array.from(teamRows).map((row, i) => {
+        const name = row.querySelector("[data-team-name]").value.trim() || `Squadra ${i + 1}`;
+        return { name };
+      });
+      if (isTeam && teams.length < 2) {
+        cfgMsg.textContent = "Servono almeno 2 squadre.";
+        cfgMsg.className = "text-xs text-red-600";
+        cfgMsg.classList.remove("hidden");
+        return;
+      }
+      const cfg = {
+        phases,
+        modules,
+        points_label_1: String(fd.get("p1") || "Punti 1").trim() || "Punti 1",
+        points_label_2: String(fd.get("p2") || "Punti 2").trim() || "Punti 2",
+        track_experience: fd.get("track_experience") === "on",
+        is_team_game: isTeam,
+        teams,
+      };
+      try {
+        const r = await fetch(`/api/playtest/games/${gameId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ procedureConfig: cfg }),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        cfgMsg.textContent = "Procedura salvata.";
+        cfgMsg.className = "text-xs text-emerald-600";
+        cfgMsg.classList.remove("hidden");
+        setTimeout(() => cfgMsg.classList.add("hidden"), 2000);
+      } catch (e) {
+        cfgMsg.textContent = e.message;
+        cfgMsg.className = "text-xs text-red-600";
+        cfgMsg.classList.remove("hidden");
+      }
+    });
+
+    // ============ EDIT INFO MODAL ============
+    const infoModal = document.getElementById("info-modal");
+    const openInfo = () => { infoModal.classList.remove("hidden"); infoModal.classList.add("flex"); };
+    const closeInfo = () => { infoModal.classList.add("hidden"); infoModal.classList.remove("flex"); };
+    document.getElementById("edit-info-btn")?.addEventListener("click", openInfo);
+    document.getElementById("info-cancel")?.addEventListener("click", closeInfo);
+    infoModal?.addEventListener("click", (e) => { if (e.target === infoModal) closeInfo(); });
+    const infoForm = document.getElementById("info-form");
+    infoForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(infoForm);
+      const payload = {
+        name: String(fd.get("name") || "").trim(),
+        shortDescription: String(fd.get("shortDescription") || "").trim() || null,
+        description: String(fd.get("description") || "").trim() || null,
+        designers: String(fd.get("designers") || "").trim() || null,
+        playersMin: fd.get("playersMin") ? Number(fd.get("playersMin")) : null,
+        playersMax: fd.get("playersMax") ? Number(fd.get("playersMax")) : null,
+        durationMinMinutes: fd.get("durationMinMinutes") ? Number(fd.get("durationMinMinutes")) : null,
+        durationMaxMinutes: fd.get("durationMaxMinutes") ? Number(fd.get("durationMaxMinutes")) : null,
+        minAge: fd.get("minAge") ? Number(fd.get("minAge")) : null,
+      };
+      const err = document.getElementById("info-err");
+      err.classList.add("hidden");
+      try {
+        const r = await fetch(`/api/playtest/games/${gameId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        window.location.reload();
+      } catch (e) { err.textContent = e.message; err.classList.remove("hidden"); }
+    });
+
+    // ============ FILE UPLOAD ============
+    const fileInput = document.getElementById("file-input");
+    const uploadModal = document.getElementById("upload-modal");
+    const uploadForm = document.getElementById("upload-form");
+    const uploadStatus = document.getElementById("upload-status");
+    const uploadFilename = document.getElementById("upload-filename");
+    const uploadErr = document.getElementById("upload-err");
+    let pendingFile = null;
+
+    fileInput?.addEventListener("change", (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      pendingFile = f;
+      uploadFilename.textContent = `${f.name} (${(f.size / 1024).toFixed(0)} KB)`;
+      uploadErr.classList.add("hidden");
+      uploadModal.classList.remove("hidden"); uploadModal.classList.add("flex");
+    });
+    document.getElementById("upload-cancel")?.addEventListener("click", () => {
+      uploadModal.classList.add("hidden"); uploadModal.classList.remove("flex");
+      pendingFile = null; fileInput.value = "";
+    });
+    uploadModal?.addEventListener("click", (e) => {
+      if (e.target === uploadModal) {
+        uploadModal.classList.add("hidden"); uploadModal.classList.remove("flex");
+        pendingFile = null; fileInput.value = "";
+      }
+    });
+    uploadForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!pendingFile) return;
+      const submitBtn = document.getElementById("upload-submit");
+      submitBtn.disabled = true;
+      uploadErr.classList.add("hidden");
+      uploadModal.classList.add("hidden"); uploadModal.classList.remove("flex");
+      uploadStatus.textContent = `Carico "${pendingFile.name}" su Drive…`;
+      uploadStatus.classList.remove("hidden");
+      try {
+        const fd = new FormData();
+        fd.append("file", pendingFile);
+        fd.append("kind", uploadForm.kind.value);
+        fd.append("description", uploadForm.description.value);
+        const r = await fetch(`/api/playtest/games/${gameId}/files`, {
+          method: "POST",
+          body: fd,
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        uploadStatus.textContent = "Caricato!";
+        uploadStatus.className = "mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-800";
+        setTimeout(() => window.location.reload(), 600);
+      } catch (e) {
+        uploadStatus.textContent = `Errore: ${e.message}`;
+        uploadStatus.className = "mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800";
+      } finally {
+        submitBtn.disabled = false;
+        pendingFile = null; fileInput.value = "";
+      }
+    });
+
+    // Delete file
+    document.querySelectorAll("[data-del-file]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const fid = btn.dataset.delFile;
+        if (!confirm("Rimuovere il file da Drive e dalla scheda?")) return;
+        const r = await fetch(`/api/playtest/games/${gameId}/files/${fid}`, { method: "DELETE" });
+        if (r.ok) window.location.reload();
+      });
+    });
+
+    // ============ TOGGLE STATUS ============
+    document.getElementById("toggle-status")?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      const cur = btn.dataset.status;
+      const next = cur === "archived" ? "active" : "archived";
+      const r = await fetch(`/api/playtest/games/${gameId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok) window.location.reload();
+    });
+
+    // ============ SESSION KEBAB MENUS ============
+    // Apertura/chiusura menu (uno solo aperto alla volta, chiusura su click fuori)
+    function closeAllKebabs() {
+      document.querySelectorAll("[data-kebab-menu]").forEach((m) => m.classList.add("hidden"));
+    }
+    document.querySelectorAll(".nx-session-menu").forEach((wrap) => {
+      const sessionId = wrap.dataset.sessionId;
+      const currentLabel = wrap.dataset.sessionLabel;
+      const currentStatus = wrap.dataset.sessionStatus;
+      const kebabBtn = wrap.querySelector("[data-kebab]");
+      const menu = wrap.querySelector("[data-kebab-menu]");
+
+      kebabBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const wasHidden = menu.classList.contains("hidden");
+        closeAllKebabs();
+        if (wasHidden) menu.classList.remove("hidden");
+      });
+
+      // I bottoni dentro al menu non devono propagare il click sulla card padre
+      menu.addEventListener("click", (e) => { e.stopPropagation(); });
+
+      // Rename
+      menu.querySelector('[data-action="rename"]')?.addEventListener("click", async () => {
+        closeAllKebabs();
+        const newLabel = prompt("Nuovo nome per questa sessione:", currentLabel);
+        if (newLabel == null || newLabel.trim() === "" || newLabel === currentLabel) return;
+        const r = await fetch(`/api/playtest/sessions/${sessionId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: newLabel.trim() }),
+        });
+        const j = await r.json();
+        if (r.ok && j.ok) window.location.reload();
+        else alert("Errore: " + (j.error || r.status));
+      });
+
+      // Archive / Unarchive
+      const archiveBtn = menu.querySelector('[data-action="archive"]');
+      const unarchiveBtn = menu.querySelector('[data-action="unarchive"]');
+      async function setStatus(next, confirmMsg) {
+        if (confirmMsg && !confirm(confirmMsg)) return;
+        const r = await fetch(`/api/playtest/sessions/${sessionId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: next }),
+        });
+        const j = await r.json();
+        if (r.ok && j.ok) window.location.reload();
+        else alert("Errore: " + (j.error || r.status));
+      }
+      archiveBtn?.addEventListener("click", () => { closeAllKebabs(); setStatus("archived"); });
+      unarchiveBtn?.addEventListener("click", () => {
+        closeAllKebabs();
+        // Ripristina come "completed" se aveva dati, altrimenti "planned"
+        setStatus("completed");
+      });
+
+      // Delete
+      menu.querySelector('[data-action="delete"]')?.addEventListener("click", async () => {
+        closeAllKebabs();
+        if (!confirm(`Eliminare definitivamente la sessione "${currentLabel}"?\n\nVerranno persi anche tutti i turni, le osservazioni, le checklist e i commenti OMNI di questa sessione. Operazione irreversibile.`)) return;
+        const r = await fetch(`/api/playtest/sessions/${sessionId}`, { method: "DELETE" });
+        const j = await r.json();
+        if (r.ok && j.ok) window.location.reload();
+        else alert("Errore: " + (j.error || r.status));
+      });
+    });
+
+    // Click fuori chiude qualsiasi menu aperto
+    document.addEventListener("click", closeAllKebabs);
+    // ESC chiude
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAllKebabs(); });
+  </script>
+</PlaytestLayout>

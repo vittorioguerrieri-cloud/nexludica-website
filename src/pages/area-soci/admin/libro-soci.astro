@@ -29,7 +29,7 @@ const today = new Date().toLocaleDateString("it-IT", { day: "numeric", month: "l
     <div>
       <h2 class="text-2xl font-bold text-nx-dark">Libro soci</h2>
       <p class="mt-1 text-sm text-nx-gray-dark">
-        Registro nominativo dei soci dell'associazione. Aggiornato al {today}.
+        Registro nominativo delle persone iscritte all'associazione. Aggiornato al {today}.
       </p>
     </div>
     <button onclick="window.print()" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-dark hover:border-nx-cyan hover:text-nx-cyan">
@@ -46,9 +46,9 @@ const today = new Date().toLocaleDateString("it-IT", { day: "numeric", month: "l
           <th class="px-3 py-3 text-left">#</th>
           <th class="px-3 py-3 text-left">Nome e cognome</th>
           <th class="px-3 py-3 text-left">Codice fiscale</th>
-          <th class="px-3 py-3 text-left">Nato/a il</th>
+          <th class="px-3 py-3 text-left">Data di nascita</th>
           <th class="px-3 py-3 text-left">Residenza</th>
-          <th class="px-3 py-3 text-left">Iscritto/a dal</th>
+          <th class="px-3 py-3 text-left">Iscrizione dal</th>
           <th class="px-3 py-3 text-left">Stato</th>
           <th class="px-3 py-3 text-left">Carica</th>
         </tr>
@@ -86,5 +86,5 @@ const today = new Date().toLocaleDateString("it-IT", { day: "numeric", month: "l
     </table>
   </div>
 
-  <p class="mt-4 text-xs text-nx-gray-dark">Totale soci: <strong class="text-nx-dark">{soci.length}</strong></p>
+  <p class="mt-4 text-xs text-nx-gray-dark">Totale persone iscritte: <strong class="text-nx-dark">{soci.length}</strong></p>
 </AreaSociLayout>

@@ -1,10 +1,11 @@
 ---
 import BaseLayout from "./BaseLayout.astro";
 import { getUser } from "../server/guards";
+import { canManageMeetludica } from "../server/permissions";
 
 export interface Props {
   title?: string;
-  active?: "dashboard" | "profilo" | "articoli" | "verbali" | "admin" | "libro-soci" | "quote" | "volontari" | "research";
+  active?: "dashboard" | "profilo" | "articoli" | "verbali" | "contatti" | "calendario" | "admin" | "libro-soci" | "quote" | "volontari" | "research" | "meetludica" | "finanze" | "notule";
 }
 const { title = "Area Soci — NexLudica APS", active = "dashboard" } = Astro.props;
 
@@ -14,21 +15,27 @@ if (!user) {
 }
 
 const isAdmin = user.role === "admin";
+const canMeet = canManageMeetludica(user);
 
 const navItems: Array<{ href: string; key: string; label: string; icon: string; adminOnly?: boolean; section?: string }> = [
   { href: "/area-soci", key: "dashboard", label: "Dashboard", icon: "▣" },
   { href: "/area-soci/profilo", key: "profilo", label: "Il mio profilo", icon: "◔" },
   { href: "/area-soci/articoli", key: "articoli", label: "Articoli MeetLudica", icon: "✎" },
   { href: "/area-soci/verbali", key: "verbali", label: "Verbali e documenti", icon: "▤" },
-  { href: "/area-soci/admin", key: "admin", label: "Soci e collaboratori", icon: "⚙", adminOnly: true, section: "admin" },
+  { href: "/area-soci/contatti", key: "contatti", label: "Contatti", icon: "☎" },
+  { href: "/area-soci/calendario", key: "calendario", label: "Bandi, conferenze, eventi", icon: "◷" },
+  { href: "/area-soci/admin", key: "admin", label: "Persone iscritte", icon: "⚙", adminOnly: true, section: "admin" },
   { href: "/area-soci/admin/libro-soci", key: "libro-soci", label: "Libro soci", icon: "❡", adminOnly: true, section: "admin" },
   { href: "/area-soci/admin/quote", key: "quote", label: "Registro quote", icon: "€", adminOnly: true, section: "admin" },
-  { href: "/area-soci/admin/volontari", key: "volontari", label: "Registro volontari", icon: "♥", adminOnly: true, section: "admin" },
+  { href: "/area-soci/admin/finanze", key: "finanze", label: "Bilancio e fondi", icon: "▦", adminOnly: true, section: "admin" },
+  { href: "/area-soci/admin/notule", key: "notule", label: "Notule e compensi", icon: "✒", adminOnly: true, section: "admin" },
+  { href: "/area-soci/admin/volontari", key: "volontari", label: "Registro volontariato", icon: "♥", adminOnly: true, section: "admin" },
   { href: "/area-soci/research", key: "research", label: "Research Platform", icon: "▲", adminOnly: true, section: "admin" },
-].filter((it) => !it.adminOnly || isAdmin);
+  { href: "/area-soci/admin/meetludica", key: "meetludica", label: "MeetLudica", icon: "✉", adminOnly: true, section: "admin" },
+].filter((it) => !it.adminOnly || isAdmin || (it.key === "meetludica" && canMeet));
 ---
 
-<BaseLayout title={title} description="Area riservata ai soci NexLudica.">
+<BaseLayout title={title} description="Area riservata alle persone iscritte a NexLudica." noindex={true}>
   <section class="bg-nx-off-white px-4 pb-8 pt-28">
     <div class="mx-auto max-w-6xl">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -40,9 +47,11 @@ const navItems: Array<{ href: string; key: string; label: string; icon: string; 
         </div>
         <div class="flex items-center gap-3 text-sm text-nx-gray-dark">
           <span>{user.email}</span>
-          <a href="/api/auth/logout" class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan">
-            Esci
-          </a>
+          <form method="post" action="/api/auth/logout" class="m-0 p-0">
+            <button type="submit" class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan">
+              Esci
+            </button>
+          </form>
         </div>
       </div>
     </div>

@@ -56,13 +56,13 @@ const annoCorrente = new Date().getFullYear();
       <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Quota anno {annoCorrente}</p>
       <p class="mt-2 text-3xl font-black text-nx-dark">{fmtMoney(QUOTA_ANNO_CORRENTE)}</p>
       <p class="mt-1 text-xs text-nx-gray-dark">
-        {QUOTA_ANNO_CORRENTE === 0 ? "Nessuna quota richiesta. Tutti i soci sono in pari." : "Importo deliberato dall'assemblea."}
+        {QUOTA_ANNO_CORRENTE === 0 ? "Nessuna quota richiesta. Tuttɜ in regola." : "Importo deliberato dall'assemblea."}
       </p>
     </div>
     <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
       <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">In regola</p>
       <p class="mt-2 text-3xl font-black text-emerald-700">{inRegola.length}</p>
-      <p class="mt-1 text-xs text-nx-gray-dark">su {soci.length} soci totali</p>
+      <p class="mt-1 text-xs text-nx-gray-dark">su {soci.length} persone iscritte</p>
     </div>
     <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
       <p class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Totale incassato</p>
@@ -78,7 +78,7 @@ const annoCorrente = new Date().getFullYear();
       <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
         <tr>
           <th class="px-3 py-3 text-left">#</th>
-          <th class="px-3 py-3 text-left">Socio</th>
+          <th class="px-3 py-3 text-left">Persona</th>
           <th class="px-3 py-3 text-left">Iscritto dal</th>
           <th class="px-3 py-3 text-left">Ultima quota</th>
           <th class="px-3 py-3 text-left">Importo</th>

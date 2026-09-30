@@ -11,11 +11,11 @@
 import type { APIRoute } from "astro";
 import { getDb, getEnv, now } from "../../../server/db";
 import { loadUserFromContext } from "../../../server/auth";
+import { validateFileMagic } from "../../../server/file-magic";
 
 export const prerender = false;
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export const POST: APIRoute = async (ctx) => {
   const env = (await getEnv()) as Env;
@@ -29,15 +29,18 @@ export const POST: APIRoute = async (ctx) => {
   const file = fd.get("photo");
   if (!file || !(file instanceof File)) return json({ ok: false, error: "Nessun file" }, 400);
   if (file.size > MAX_BYTES) return json({ ok: false, error: `File troppo grande (max ${MAX_BYTES / 1024 / 1024} MB)` }, 413);
-  if (!ALLOWED.has(file.type)) return json({ ok: false, error: "Tipo file non supportato (solo JPG/PNG/WebP)" }, 415);
 
-  // Estrai estensione dal mime
-  const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+  // Validazione MIME via magic bytes (header HTTP puo' essere falsato).
+  const v = await validateFileMagic(file, ["image/jpeg", "image/png", "image/webp"]);
+  if (!v.ok) return json({ ok: false, error: v.error + " (solo JPG/PNG/WebP)" }, 415);
+  const detectedMime = v.mime;
+
+  const ext = detectedMime === "image/png" ? "png" : detectedMime === "image/webp" ? "webp" : "jpg";
   const ts = Date.now();
   const key = `profiles/${user.id}/${ts}.${ext}`;
   await storage.put(key, file.stream(), {
     httpMetadata: {
-      contentType: file.type,
+      contentType: detectedMime,
       cacheControl: "public, max-age=31536000, immutable",
     },
   });

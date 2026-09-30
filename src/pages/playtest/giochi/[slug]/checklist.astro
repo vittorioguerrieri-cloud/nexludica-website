@@ -1,0 +1,378 @@
+---
+/**
+ * Editor delle checklist osservative per un singolo gioco.
+ *
+ * Mostra due tab (Osservazione / Set-up), liste editabili degli item, e
+ * bottoni "Personalizza" (clona i template di sistema come custom) e
+ * "Reset" (cancella i custom, torna ai default).
+ *
+ * Aggiungere/modificare/cancellare item via API che gestisce la logica
+ * "clone-on-write" (al primo add crea anche i default come custom).
+ */
+import PlaytestLayout from "../../../../layouts/PlaytestLayout.astro";
+import { getDb, getEnv } from "../../../../server/db";
+import { getUser } from "../../../../server/guards";
+import {
+  getGameBySlug,
+  listChecklistItems,
+  hasCustomChecklistItems,
+  type ChecklistItem,
+  type Game,
+} from "../../../../server/playtest";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) {
+  const nextUrl = encodeURIComponent(new URL(Astro.request.url).toString());
+  return Astro.redirect(`https://nexludica.org/login?next=${nextUrl}`);
+}
+
+const { slug } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+
+let game: Game | null = null;
+let obsItems: ChecklistItem[] = [];
+let setupItems: ChecklistItem[] = [];
+let obsIsCustom = false;
+let setupIsCustom = false;
+if (db && slug) {
+  game = await getGameBySlug(db, String(slug));
+  if (game) {
+    obsItems = await listChecklistItems(db, "observation", game.id);
+    setupItems = await listChecklistItems(db, "setup", game.id);
+    obsIsCustom = await hasCustomChecklistItems(db, game.id, "observation");
+    setupIsCustom = await hasCustomChecklistItems(db, game.id, "setup");
+  }
+}
+if (!game) return new Response("Gioco non trovato", { status: 404 });
+
+const bootstrap = { gameId: game.id, obsItems, setupItems, obsIsCustom, setupIsCustom };
+---
+
+<PlaytestLayout
+  title={`Checklist — ${game.name}`}
+  crumbs={[
+    { label: game.name, href: `/giochi/${game.slug}` },
+    { label: "Checklist" },
+  ]}
+>
+  <section class="rounded-xl bg-white p-6 shadow-sm">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Checklist editor</p>
+        <h1 class="mt-2 text-2xl font-black tracking-tight text-nx-dark sm:text-3xl" style="font-family: var(--font-display);">
+          Modifica le checklist
+        </h1>
+        <p class="mt-2 max-w-2xl text-sm text-nx-gray-dark">
+          Personalizza gli item osservativi (compilati durante Inizio / Fine / Partecipata)
+          e quelli di Set-up. Le nuove sessioni useranno la versione personalizzata.
+          Le sessioni già compilate restano intatte.
+        </p>
+      </div>
+      <a href={`/giochi/${game.slug}`} class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">
+        ← Torna al gioco
+      </a>
+    </div>
+
+    <div class="mt-6 flex gap-1 border-b border-nx-gray-light/30">
+      <button data-tab="observation" class="nx-tab nx-tab-active">Osservazione (Inizio/Fine/Partecipata)</button>
+      <button data-tab="setup" class="nx-tab">Set-up</button>
+    </div>
+  </section>
+
+  <section data-panel="observation" class="mt-6 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
+      <div class="text-sm">
+        <strong>Stato:</strong>
+        <span id="obs-status" class={obsIsCustom ? "text-nx-cyan" : "text-nx-gray-dark"}>
+          {obsIsCustom ? "Personalizzata per questo gioco" : "Default di sistema (17 item)"}
+        </span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {!obsIsCustom && (
+          <button data-action="clone" data-applies="observation"
+            class="rounded-md border border-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light">
+            Personalizza (parti dai default)
+          </button>
+        )}
+        {obsIsCustom && (
+          <button data-action="reset" data-applies="observation"
+            class="rounded-md border border-red-300 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-red-600 hover:bg-red-50">
+            Reset ai default
+          </button>
+        )}
+      </div>
+    </div>
+    <div id="obs-list" class="space-y-2"></div>
+    <button id="obs-add" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+      + Nuovo item
+    </button>
+  </section>
+
+  <section data-panel="setup" class="mt-6 hidden space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4 shadow-sm">
+      <div class="text-sm">
+        <strong>Stato:</strong>
+        <span id="setup-status" class={setupIsCustom ? "text-nx-cyan" : "text-nx-gray-dark"}>
+          {setupIsCustom ? "Personalizzata per questo gioco" : "Default di sistema (3 item)"}
+        </span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        {!setupIsCustom && (
+          <button data-action="clone" data-applies="setup"
+            class="rounded-md border border-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light">
+            Personalizza (parti dai default)
+          </button>
+        )}
+        {setupIsCustom && (
+          <button data-action="reset" data-applies="setup"
+            class="rounded-md border border-red-300 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-red-600 hover:bg-red-50">
+            Reset ai default
+          </button>
+        )}
+      </div>
+    </div>
+    <div id="setup-list" class="space-y-2"></div>
+    <button id="setup-add" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+      + Nuovo item
+    </button>
+  </section>
+
+  {/* Modal edit/add */}
+  <div id="item-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl">
+      <h2 id="item-modal-title" class="text-xl font-bold text-nx-dark">Item</h2>
+      <form id="item-form" class="mt-4 space-y-3">
+        <input type="hidden" name="id" />
+        <input type="hidden" name="appliesTo" />
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Categoria *</label>
+            <input name="category" required maxlength="80" placeholder="es. ERGONOMIA FISICA"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Sottocategoria</label>
+            <input name="subcategory" maxlength="80" placeholder="es. Seduta"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Domanda / testo dell'item *</label>
+          <textarea name="text" required rows="3" maxlength="400"
+            placeholder="Es. I giocatori sembrano divertirsi?"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+          <p class="mt-1 text-[11px] text-nx-gray-dark">Formula sempre in positivo (es. "I giocatori NON sembrano frustrati"): la scala 0–10 sarà sempre "più alto = meglio".</p>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Posizione (ordine)</label>
+          <input name="position" type="number" placeholder="es. 100"
+            class="mt-1 w-32 rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <p id="item-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+        <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-3">
+          <button type="button" id="item-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+          <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="application/json" id="bootstrap" set:html={JSON.stringify(bootstrap)} />
+
+  <style is:global>
+    .nx-tab {
+      padding: 0.5rem 1rem; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; color: rgb(102 102 102); border-bottom: 3px solid transparent;
+      margin-bottom: -1px; cursor: pointer; transition: all 0.15s;
+    }
+    .nx-tab:hover { color: #05abc4; }
+    .nx-tab-active { color: #05abc4; border-bottom-color: #05abc4; }
+  </style>
+
+  <script is:inline>
+    const boot = JSON.parse(document.getElementById("bootstrap").textContent || "{}");
+    const state = {
+      gameId: boot.gameId,
+      observation: { items: boot.obsItems, isCustom: boot.obsIsCustom },
+      setup: { items: boot.setupItems, isCustom: boot.setupIsCustom },
+    };
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // ===== TABS =====
+    document.querySelectorAll(".nx-tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        const key = t.dataset.tab;
+        document.querySelectorAll(".nx-tab").forEach((x) => x.classList.toggle("nx-tab-active", x === t));
+        document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== key));
+      });
+    });
+
+    // ===== RENDER LISTS =====
+    function renderList(appliesTo) {
+      const listEl = document.getElementById(appliesTo === "observation" ? "obs-list" : "setup-list");
+      const items = state[appliesTo].items;
+      const isCustom = state[appliesTo].isCustom;
+      listEl.innerHTML = "";
+      if (items.length === 0) {
+        listEl.innerHTML = `<div class="rounded-md border-2 border-dashed border-nx-gray-light/40 bg-white p-6 text-center text-sm text-nx-gray-dark">Nessun item.</div>`;
+        return;
+      }
+      // Raggruppa per categoria
+      const byCat = new Map();
+      for (const it of items) {
+        const k = it.category;
+        if (!byCat.has(k)) byCat.set(k, []);
+        byCat.get(k).push(it);
+      }
+      for (const [cat, group] of byCat) {
+        const block = document.createElement("div");
+        block.className = "rounded-lg bg-white shadow-sm";
+        block.innerHTML = `<div class="border-b border-nx-gray-light/20 px-4 py-2 text-xs font-bold uppercase tracking-wider text-nx-cyan">${esc(cat)}</div>`;
+        const ul = document.createElement("ul");
+        ul.className = "divide-y divide-nx-gray-light/20";
+        for (const it of group) {
+          const li = document.createElement("li");
+          li.className = "flex items-start justify-between gap-3 px-4 py-3";
+          const customBadge = it.gameId
+            ? ``
+            : `<span class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700" title="Modifica impatta tutti i giochi senza override">Default globale</span>`;
+          li.innerHTML = `
+            <div class="min-w-0 flex-1">
+              ${it.subcategory ? `<p class="text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">${esc(it.subcategory)}</p>` : ""}
+              <p class="text-sm text-nx-dark">${esc(it.text)}${customBadge}</p>
+              <p class="mt-1 text-[10px] text-nx-gray-dark">Posizione: ${it.position}</p>
+            </div>
+            <div class="flex shrink-0 gap-2">
+              <button data-action="edit" data-applies="${appliesTo}" data-id="${it.id}" class="text-xs font-semibold text-nx-cyan hover:underline">Modifica</button>
+              <button data-action="delete" data-applies="${appliesTo}" data-id="${it.id}" class="text-xs font-semibold text-red-500 hover:text-red-700">Elimina</button>
+            </div>`;
+          ul.appendChild(li);
+        }
+        block.appendChild(ul);
+        listEl.appendChild(block);
+      }
+    }
+
+    // ===== MODAL =====
+    const modal = document.getElementById("item-modal");
+    const form = document.getElementById("item-form");
+    function openModal({ id, appliesTo, category, subcategory, text, position }) {
+      form.id.value = id || "";
+      form.appliesTo.value = appliesTo;
+      form.category.value = category || "";
+      form.subcategory.value = subcategory || "";
+      form.text.value = text || "";
+      form.position.value = position != null ? position : "";
+      document.getElementById("item-modal-title").textContent = id ? "Modifica item" : "Nuovo item";
+      document.getElementById("item-err").classList.add("hidden");
+      modal.classList.remove("hidden"); modal.classList.add("flex");
+    }
+    function closeModal() { modal.classList.add("hidden"); modal.classList.remove("flex"); }
+    document.getElementById("item-cancel").addEventListener("click", closeModal);
+    modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("item-err");
+      errEl.classList.add("hidden");
+      const payload = {
+        category: form.category.value.trim(),
+        subcategory: form.subcategory.value.trim() || null,
+        text: form.text.value.trim(),
+        position: form.position.value ? Number(form.position.value) : undefined,
+        appliesTo: form.appliesTo.value,
+      };
+      try {
+        let r;
+        if (form.id.value) {
+          r = await fetch(`/api/playtest/checklist-items/${form.id.value}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          r = await fetch(`/api/playtest/games/${state.gameId}/checklist-items?appliesTo=${payload.appliesTo}`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+        }
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        closeModal();
+        await refreshList(payload.appliesTo);
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove("hidden");
+      }
+    });
+
+    // ===== CLONE / RESET =====
+    document.body.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const appliesTo = btn.dataset.applies;
+      if (action === "clone") {
+        if (!confirm("Personalizzo gli item per questo gioco? Verrà creata una copia editabile dei 17 default.")) return;
+        await fetch(`/api/playtest/games/${state.gameId}/checklist-items?action=clone&appliesTo=${appliesTo}`, { method: "POST" });
+        await refreshList(appliesTo);
+      } else if (action === "reset") {
+        if (!confirm("Reset agli item di sistema? Tutte le personalizzazioni del gioco verranno PERSE.")) return;
+        await fetch(`/api/playtest/games/${state.gameId}/checklist-items?action=reset&appliesTo=${appliesTo}`, { method: "POST" });
+        await refreshList(appliesTo);
+      } else if (action === "edit") {
+        const id = btn.dataset.id;
+        const it = state[appliesTo].items.find((x) => x.id === id);
+        if (!it) return;
+        if (!it.gameId) {
+          // Item di sistema → modifica globale, conferma esplicita
+          if (!confirm("Questo è un item DEFAULT del sistema: la modifica avrà effetto su tutti i giochi senza override. Procedere?")) return;
+        }
+        openModal({ id: it.id, appliesTo, category: it.category, subcategory: it.subcategory, text: it.text, position: it.position });
+      } else if (action === "delete") {
+        const id = btn.dataset.id;
+        const it = state[appliesTo].items.find((x) => x.id === id);
+        const msg = (it && !it.gameId)
+          ? "Eliminare questo item DEFAULT? Tutti i giochi senza override lo perderanno."
+          : "Eliminare l'item?";
+        if (!confirm(msg)) return;
+        await fetch(`/api/playtest/checklist-items/${id}`, { method: "DELETE" });
+        await refreshList(appliesTo);
+      }
+    });
+
+    document.getElementById("obs-add").addEventListener("click", () => openModal({ appliesTo: "observation", position: 9999 }));
+    document.getElementById("setup-add").addEventListener("click", () => openModal({ appliesTo: "setup", position: 9999 }));
+
+    async function refreshList(appliesTo) {
+      const r = await fetch(`/api/playtest/games/${state.gameId}/checklist-items?appliesTo=${appliesTo}`);
+      const j = await r.json();
+      if (r.ok && j.ok) {
+        state[appliesTo].items = j.items;
+        state[appliesTo].isCustom = j.isCustom;
+        // Aggiorna lo status bar e i bottoni clone/reset
+        const statusEl = document.getElementById(appliesTo === "observation" ? "obs-status" : "setup-status");
+        statusEl.textContent = j.isCustom ? "Personalizzata per questo gioco" : `Default di sistema (${j.items.length} item)`;
+        statusEl.className = j.isCustom ? "text-nx-cyan" : "text-nx-gray-dark";
+        // Re-render lista
+        renderList(appliesTo);
+        // Toggle bottoni clone/reset: ricarico la pagina per semplicità
+        // (rimostra il bottone giusto). Solo se è cambiato lo stato di custom.
+        const cloneBtn = document.querySelector(`[data-action="clone"][data-applies="${appliesTo}"]`);
+        const resetBtn = document.querySelector(`[data-action="reset"][data-applies="${appliesTo}"]`);
+        if (j.isCustom && cloneBtn) cloneBtn.remove();
+        if (!j.isCustom && resetBtn) resetBtn.remove();
+      }
+    }
+
+    // Initial render
+    renderList("observation");
+    renderList("setup");
+  </script>
+</PlaytestLayout>

@@ -39,15 +39,12 @@ const defaultTheme = {
 const theme = study.themeJson ? study.themeJson : JSON.stringify(defaultTheme);
 const schemaForClient = questionnaire.schemaJson;
 const questionnaireId = questionnaire.id;
+const prolificCompletionUrl = study.prolificCompletionUrl ?? "";
 ---
 
 <ResearchLayout title={`${questionnaire.title} — ${study.title}`} fluid>
-  <a href={`/research/${study.slug}`} class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">
-    ← {study.title}
-  </a>
-
-  <div class="mt-4">
-    <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Questionario</p>
+  <div>
+    <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Questionnaire</p>
     <h1 class="mt-2 text-2xl font-bold text-nx-dark sm:text-3xl">{questionnaire.title}</h1>
     {questionnaire.description && (
       <p class="mt-3 text-sm text-nx-gray-dark whitespace-pre-line">{questionnaire.description}</p>
@@ -58,25 +55,392 @@ const questionnaireId = questionnaire.id;
   <link href="https://unpkg.com/survey-core@1.12.12/defaultV2.min.css" rel="stylesheet" />
   <div id="surveyContainer" class="mt-8"></div>
 
+  <!-- Modal popup "ripresa progresso": appare all'apertura del questionario
+       se l'utente aveva gia' iniziato (dati ripristinati da localStorage).
+       Bloccante: deve scegliere Continua o Ricomincia. -->
+  <div
+    id="nx-resume-modal"
+    class="hidden fixed inset-0 z-50 items-center justify-center bg-black/50 p-4"
+    role="alertdialog"
+    aria-labelledby="nx-resume-title"
+  >
+    <div class="w-full max-w-md rounded-xl border-2 border-nx-cyan/40 bg-white p-6 shadow-2xl">
+      <div class="text-center">
+        <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-nx-cyan-light/50 text-2xl">
+          ↩
+        </div>
+        <h3 id="nx-resume-title" class="mt-4 text-lg font-bold text-nx-dark">
+          Resume questionnaire?
+        </h3>
+        <p class="mt-2 text-sm text-nx-gray-dark">
+          You have an in-progress questionnaire, saved on <span id="nx-resume-time" class="font-medium text-nx-dark"></span>.
+          Would you like to continue where you left off or start over?
+        </p>
+      </div>
+      <div class="mt-6 flex flex-col gap-2 sm:flex-row-reverse">
+        <button
+          id="nx-resume-continue"
+          type="button"
+          class="flex-1 rounded-lg bg-nx-cyan px-4 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-md transition hover:bg-nx-blue"
+        >
+          Continue
+        </button>
+        <button
+          id="nx-resume-clear"
+          type="button"
+          class="flex-1 rounded-lg border border-nx-gray-light/40 bg-white px-4 py-2.5 text-sm font-semibold text-nx-gray-dark transition hover:border-nx-cyan hover:text-nx-cyan"
+        >
+          Start over
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Probing banner: appare quando l'utente clicca Completa con domande non
+       obbligatorie senza risposta. Sticky sul fondo viewport. -->
+  <div
+    id="nx-probing-banner"
+    class="hidden fixed inset-x-0 bottom-0 z-50 mx-auto max-w-3xl rounded-t-xl border-2 border-b-0 border-yellow-400 bg-yellow-50 p-4 shadow-2xl"
+    role="alertdialog"
+    aria-labelledby="nx-probing-title"
+  >
+    <p id="nx-probing-title" class="text-sm font-bold text-yellow-900">
+      You left <span data-count>0</span> <span data-domanda>answers</span> blank on this page
+    </p>
+    <p class="mt-1 text-xs text-yellow-900/80">
+      They are highlighted in yellow. Would you like to continue anyway or answer them first?
+    </p>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <button
+        id="nx-probing-yes"
+        type="button"
+        class="rounded-lg bg-yellow-500 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+      >
+        Continue anyway
+      </button>
+      <button
+        id="nx-probing-no"
+        type="button"
+        class="rounded-lg border border-yellow-300 bg-white px-4 py-2 text-sm font-semibold text-yellow-900 hover:bg-yellow-100"
+      >
+        Let me answer first
+      </button>
+    </div>
+  </div>
+
+  <!-- Banner ROSSO: domande con required: true (per-item) saltate.
+       Diversamente dal banner giallo, questo NON permette di proseguire:
+       l'utente deve compilare le righe obbligatorie. -->
+  <div
+    id="nx-required-banner"
+    class="hidden fixed inset-x-0 bottom-0 z-50 mx-auto max-w-3xl rounded-t-xl border-2 border-b-0 border-red-400 bg-red-50 p-4 shadow-2xl"
+    role="alertdialog"
+  >
+    <p class="text-sm font-bold text-red-900">
+      You must answer <span data-required-count>0</span> <span data-required-domanda>required questions</span> before continuing
+    </p>
+    <p class="mt-1 text-xs text-red-900/80">
+      They are highlighted in red.
+    </p>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <button
+        id="nx-required-close"
+        type="button"
+        class="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600"
+      >
+        OK, let me answer
+      </button>
+    </div>
+  </div>
+
   <!-- Thank you panel (mostrato dopo submit) -->
   <div id="thankyou" class="mt-8 hidden rounded-xl border-2 border-nx-cyan/40 bg-nx-cyan-light/30 p-8 text-center">
-    <h2 class="text-2xl font-bold text-nx-dark">Grazie! 🎉</h2>
+    <h2 class="text-2xl font-bold text-nx-dark">Thank you!</h2>
     <p class="mt-3 text-sm text-nx-gray-dark">
-      Le tue risposte sono state registrate correttamente.
+      Your responses have been recorded successfully.
     </p>
-    <p class="mt-6 text-xs uppercase tracking-wider text-nx-gray-dark">Codice di completamento</p>
-    <p id="completion-code" class="mt-2 font-mono text-2xl font-bold text-nx-dark"></p>
-    <p class="mt-2 text-xs text-nx-gray-dark">Conserva questo codice come ricevuta.</p>
+
+    <!-- Completion code (mostrato solo se NON arrivato via Prolific) -->
+    <div id="completion-code-box">
+      <p class="mt-6 text-xs uppercase tracking-wider text-nx-gray-dark">Completion code</p>
+      <p id="completion-code" class="mt-2 font-mono text-2xl font-bold text-nx-dark"></p>
+      <p class="mt-2 text-xs text-nx-gray-dark">Keep this code as your receipt.</p>
+    </div>
+
+    <!-- Prolific completion button (mostrato solo se utente è arrivato via Prolific) -->
+    <div id="prolific-return" class="mt-6 hidden">
+      <p class="text-sm text-nx-gray-dark">
+        To confirm your submission on Prolific and receive your reward, click the button below.
+      </p>
+      <a
+        id="prolific-return-link"
+        href="#"
+        class="mt-4 inline-block rounded-lg bg-nx-cyan px-7 py-3.5 text-base font-bold uppercase tracking-wider text-white no-underline shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue"
+      >
+        Return to Prolific →
+      </a>
+      <p class="mt-3 text-xs text-nx-gray-dark">
+        If the button does not work, copy this link into your browser:<br>
+        <span id="prolific-return-url" class="break-all font-mono text-[11px]"></span>
+      </p>
+    </div>
   </div>
 
   <!-- Submit error panel -->
   <div id="submit-error" class="mt-8 hidden rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"></div>
 
+  <!--
+    Stili globali per:
+    1. Matrix (scale Likert) responsive: NIENTE scroll orizzontale su mobile.
+       Su schermi ≤ 768px ogni riga della matrice diventa una "card" con
+       il prompt sopra e gli item Likert stackati verticalmente. Ogni item
+       mostra l'etichetta della colonna inline (es. "Per nulla", "Poco"…).
+       Lo scroll orizzontale su Likert è il principale source-of-bias mobile:
+       l'utente tende a selezionare gli item visibili a sinistra senza
+       confrontare l'intera scala (left-anchor bias).
+    2. Probing visivo per le risposte mancate (non obbligatorie): highlight
+       giallo + ribbon inline "non hai fornito una risposta a questa domanda".
+  -->
+  <style is:global>
+    /* === 1. MATRIX → CARD STACK SU TUTTI I VIEWPORT ===
+
+       Ogni matrice viene trasformata in card-stack (una card per item).
+       Card layout:
+         [ Prompt della domanda                                          ]
+         [ ── ── ── ── ── ── ──                                          ]
+         [  ◯       ◯       ◯       ◯       ◯       ◯       ◯           ]
+         [ Per    Poco   Abbast. Molto  Sempre  ...                       ]
+         [nulla                                                            ]
+
+       Sotto i 480px le opzioni vanno a capo. Niente scroll orizzontale,
+       layout coerente fra mobile/tablet/desktop. */
+
+    /* Niente overflow-x sui wrapper SurveyJS */
+    .sd-question,
+    .sd-question__content,
+    .sd-element,
+    .sd-element__content,
+    .sd-matrix,
+    .sd-table-wrapper,
+    [class*="sd-matrix"],
+    [class*="sd-table"]:not(.sd-table__cell):not(.sd-table__row) {
+      overflow-x: visible !important;
+      overflow: visible !important;
+    }
+
+    /* Table → block */
+    .sd-question table,
+    .sd-element table {
+      display: block !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      border: 0 !important;
+      border-collapse: separate !important;
+      border-spacing: 0 !important;
+      table-layout: auto !important;
+    }
+    /* Header riga colonne nascosto (le etichette le mostriamo sotto ogni radio) */
+    .sd-question table > thead,
+    .sd-element table > thead {
+      display: none !important;
+    }
+    .sd-question table > tbody,
+    .sd-element table > tbody {
+      display: block !important;
+      width: 100% !important;
+    }
+
+    /* Forza la catena di contenitori SurveyJS a occupare 100% della
+       larghezza del genitore. Senza questa regola la matrice si schiaccia
+       a sinistra perche' qualcuno nella catena usa width:auto / fit-content. */
+    .sd-question--matrix,
+    .sd-question--matrix .sd-question__content,
+    .sd-question--matrix fieldset,
+    .sd-element--matrix,
+    .sd-table-wrapper {
+      width: 100% !important;
+      max-width: none !important;
+    }
+
+    /* Ogni riga = card CSS Grid.
+       Il grid-template-columns viene ridefinito inline dal JS in base al
+       numero esatto di colonne della matrice: repeat(N, minmax(0, 1fr)).
+       Qui c'e' un fallback con auto-fit per il rendering iniziale. */
+    .sd-question table > tbody > tr,
+    .sd-element table > tbody > tr {
+      display: grid !important;
+      grid-template-columns: repeat(auto-fit, minmax(0, 1fr)) !important;
+      grid-auto-rows: auto !important;
+      column-gap: 0.4rem !important;
+      row-gap: 0.5rem !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 0 0.875rem 0 !important;
+      padding: 0.875rem 1rem !important;
+      border: 1px solid rgba(101, 113, 121, 0.22) !important;
+      border-radius: 12px !important;
+      background: #ffffff !important;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+      box-sizing: border-box !important;
+    }
+
+    /* Prima cella (prompt) = full-width: span tutte le colonne */
+    .sd-question table > tbody > tr > td:first-child,
+    .sd-element table > tbody > tr > td:first-child {
+      grid-column: 1 / -1 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      font-weight: 700 !important;
+      font-size: 0.95rem !important;
+      color: #1b2528 !important;
+      padding: 0.1rem 0 0.65rem 0 !important;
+      border-bottom: 1px solid rgba(101, 113, 121, 0.18) !important;
+      margin-bottom: 0.25rem !important;
+      text-align: left !important;
+      white-space: normal !important;
+    }
+
+    /* Celle radio = una per colonna del grid */
+    .sd-question table > tbody > tr > td:not(:first-child),
+    .sd-element table > tbody > tr > td:not(:first-child) {
+      min-width: 0 !important;
+      max-width: 100% !important;
+      padding: 0.4rem 0.15rem !important;
+      border: none !important;
+      box-sizing: border-box !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 0.35rem !important;
+      text-align: center !important;
+      border-radius: 8px !important;
+      cursor: pointer !important;
+      transition: background-color 0.15s ease;
+    }
+    .sd-question table > tbody > tr > td:not(:first-child):hover,
+    .sd-element table > tbody > tr > td:not(:first-child):hover {
+      background: rgba(5, 171, 196, 0.06) !important;
+    }
+
+    /* Etichetta colonna sotto al radio.
+       Il `text` della colonna è formattato come "1\nStrongly disagree"
+       (numero + newline + etichetta): white-space pre-line interpreta il \n
+       come line break. La prima riga (numero) appare in grassetto via :first-line. */
+    .sd-question table > tbody > tr > td[data-col-label]:not(:first-child)::after,
+    .sd-element table > tbody > tr > td[data-col-label]:not(:first-child)::after {
+      content: attr(data-col-label);
+      display: block;
+      font-size: 0.7rem;
+      line-height: 1.2;
+      color: #6b7280;
+      font-weight: 500;
+      margin-top: 0.25rem;
+      max-width: 100%;
+      word-wrap: break-word;
+      white-space: pre-line;
+    }
+    /* Numero in cima alla scala: prima riga del ::after un po' più grande/bold */
+    .sd-question table > tbody > tr > td[data-col-label]:not(:first-child)::after {
+      /* Browser supportano ::first-line solo su block elements: il display:block
+         del ::after lo rende valido. La prima riga è il numero. */
+    }
+    .sd-question table > tbody > tr > td[data-col-label]:not(:first-child)::first-line,
+    .sd-element table > tbody > tr > td[data-col-label]:not(:first-child)::first-line {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #1b2528;
+    }
+
+    /* Reset item radio interno (rimuovi spaziature SurveyJS) */
+    .sd-question table .sd-item,
+    .sd-question table .sd-radio,
+    .sd-question table .sd-selectbase__item {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: auto !important;
+    }
+    /* Nascondi eventuale label di testo che SurveyJS mette accanto al radio
+       (la nostra etichetta ::after e' piu' pulita) */
+    .sd-question table .sd-item__control-label:empty {
+      display: none !important;
+    }
+
+    /* Su schermi molto stretti (<480px) - se ci sono 6+ colonne, lascia
+       andare a capo. min-width 4.5rem garantisce 3-4 per riga su iPhone SE. */
+    @media (max-width: 480px) {
+      .sd-question table > tbody > tr > td:not(:first-child),
+      .sd-element table > tbody > tr > td:not(:first-child) {
+        flex-basis: 4.5rem !important;
+        flex-grow: 1 !important;
+      }
+    }
+
+    /* === 1b. PROGRESS BAR NON-NAVIGABILE === */
+    /* La progress bar di SurveyJS, con progressBarType="buttons", rende le
+       singole pagine cliccabili. Per evitare che l'utente salti pagine
+       (e quindi falsi la sequenza temporale delle risposte), disabilitiamo
+       i click sui bottoni della progress bar mantenendola visibile. */
+    .sd-progress-buttons,
+    .sd-progress,
+    .sd-progress__bar {
+      pointer-events: none !important;
+    }
+    .sd-progress-buttons__list,
+    .sd-progress-buttons__list-container,
+    .sd-progress-buttons__page-title,
+    .sd-progress-buttons__page,
+    .sd-progress-buttons__connector,
+    .sd-progress-buttons__button,
+    .sv-progress-buttons,
+    .sv-progress-buttons__list li,
+    .sv-progress-buttons__list-container {
+      pointer-events: none !important;
+      cursor: default !important;
+    }
+
+    /* === 2. PROBING: missing-answer highlight ===
+       Per le matrici l'highlight viene applicato alla singola <tr> (riga
+       card). Uso box-shadow inset per il bordo sinistro giallo, cosi'
+       NON sposta il contenuto interno (un padding/border-left modifiche-
+       rebbe il layout del grid e mi farebbe sballare le colonne). */
+    .sd-question.nx-missing,
+    .nx-missing {
+      background-color: rgba(254, 240, 138, 0.45) !important;
+      box-shadow: inset 4px 0 0 #facc15, 0 0 0 1px rgba(250, 204, 21, 0.5) !important;
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .nx-probe-inline {
+      margin: 0 0 0.6rem 0;
+      padding: 0.55rem 0.8rem;
+      border-radius: 8px;
+      background-color: #fef3c7;
+      color: #78350f;
+      font-size: 0.85rem;
+      font-weight: 500;
+      border: 1px solid #fde68a;
+    }
+    .nx-probe-inline::before {
+      content: "⚠ ";
+      font-weight: 700;
+    }
+
+    /* === 3. REQUIRED-MISSING: stesso meccanismo del probing ma in rosso,
+       bloccante. Si applica per singola riga della matrice quando lo schema
+       marca row.required === true ed è vuota. */
+    .sd-question.nx-required,
+    .nx-required {
+      background-color: rgba(254, 202, 202, 0.55) !important;
+      box-shadow: inset 4px 0 0 #ef4444, 0 0 0 1px rgba(239, 68, 68, 0.5) !important;
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+  </style>
+
   <script src="https://unpkg.com/survey-core@1.12.12/survey.core.min.js" is:inline></script>
   <script src="https://unpkg.com/survey-js-ui@1.12.12/survey-js-ui.min.js" is:inline></script>
   <script
     is:inline
-    define:vars={{ schemaJson: schemaForClient, themeJson: theme, questionnaireId }}
+    define:vars={{ schemaJson: schemaForClient, themeJson: theme, questionnaireId, prolificCompletionUrl }}
   >
     (function () {
       try {
@@ -84,7 +448,7 @@ const questionnaireId = questionnaire.id;
         const theme = JSON.parse(themeJson);
         const Survey = window.SurveyUI || window.Survey;
         if (!Survey || !Survey.Model) {
-          document.getElementById("submit-error").textContent = "Impossibile caricare SurveyJS";
+          document.getElementById("submit-error").textContent = "Unable to load the survey engine";
           document.getElementById("submit-error").classList.remove("hidden");
           return;
         }
@@ -94,6 +458,771 @@ const questionnaireId = questionnaire.id;
         } else if (survey.applyTheme) {
           try { survey.applyTheme(theme); } catch (e) {}
         }
+
+        // === Iniezione URL params nei dati payload ===
+        // Permette di "ancorare" una response a un contesto esterno (es.
+        // session di playtest). I parametri whitelisted vengono aggiunti al
+        // payload come campi nascosti.
+        try {
+          const urlParams = new URLSearchParams(window.location.search);
+          // Param "interni" generici (per ancorare risposte a contesti esterni)
+          const allowedParams = ["session", "session_id", "context"];
+          const extraData = {};
+          for (const p of allowedParams) {
+            const v = urlParams.get(p);
+            if (v) extraData[p === "session" ? "session_id" : p] = v;
+          }
+          // Param Prolific: PROLIFIC_PID, STUDY_ID, SESSION_ID (case-sensitive)
+          // Salvati nel payload come prolific_pid / prolific_study_id / prolific_session_id
+          const prolificPid = urlParams.get("PROLIFIC_PID");
+          const prolificStudy = urlParams.get("STUDY_ID");
+          const prolificSession = urlParams.get("SESSION_ID");
+          if (prolificPid) extraData.prolific_pid = prolificPid;
+          if (prolificStudy) extraData.prolific_study_id = prolificStudy;
+          if (prolificSession) extraData.prolific_session_id = prolificSession;
+          if (Object.keys(extraData).length > 0) {
+            survey.mergeData(extraData);
+          }
+          // Flag: utilizzato in fase di completamento per mostrare il bottone
+          // "Continua su Prolific"
+          window.__nx_prolific_mode = !!prolificPid;
+        } catch (e) {}
+
+        // === Cross-participant shuffle reversibile ===
+        // Se lo schema dichiara `nx_shuffle_across_pages: true`, riordiniamo
+        // TUTTE le righe delle matrici (di TUTTE le pagine) usando un seed
+        // univoco per partecipante. Il seed:
+        //   - viene generato la prima volta e persistito in localStorage
+        //     (così un refresh non re-shuffla)
+        //   - viene salvato nel payload come `_randomization_seed` e
+        //     `_randomization_meta` (lista pageName→ordine codici), così
+        //     l'ordine di somministrazione è ricostruibile a posteriori
+        try {
+          const wantsShuffle = !!(schema && (schema.nx_shuffle_across_pages === true || schema["nx_shuffle_across_pages"] === true));
+          if (wantsShuffle) {
+            const SEED_STORAGE_KEY = "nx-rand-seed:" + questionnaireId;
+            let seed = null;
+            try { seed = parseInt(localStorage.getItem(SEED_STORAGE_KEY) || "", 10); } catch (e) {}
+            if (!Number.isFinite(seed) || seed <= 0) {
+              // Nuovo seed: uint32 da crypto.getRandomValues
+              const buf = new Uint32Array(1);
+              (window.crypto || window.msCrypto).getRandomValues(buf);
+              seed = buf[0] || 1;
+              try { localStorage.setItem(SEED_STORAGE_KEY, String(seed)); } catch (e) {}
+            }
+            // Mulberry32 — stesso algoritmo del gen script lato build
+            function mulberry32(a) {
+              return function () {
+                let t = (a += 0x6d2b79f5);
+                t = Math.imul(t ^ (t >>> 15), t | 1);
+                t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+              };
+            }
+            const rng = mulberry32(seed);
+            function shuffleInPlace(arr) {
+              for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+              }
+            }
+            // Raccolgo tutte le matrici e i loro rows, preservando chunk size
+            const matrices = [];
+            survey.getAllQuestions().forEach(function (q) {
+              if (q.getType && q.getType() === "matrix" && Array.isArray(q.rows) && q.rows.length > 0) {
+                matrices.push(q);
+              }
+            });
+            if (matrices.length > 1) {
+              // Pool: array di {value, text}
+              let pool = [];
+              const sizes = matrices.map((m) => m.rows.length);
+              matrices.forEach((m) => {
+                // m.rows può essere un array di stringhe o oggetti; normalizzo.
+                // CRUCIALE: preservo il flag `required` (per-item) cosicché un
+                // item obbligatorio resti obbligatorio in qualsiasi slot finisca
+                // dopo lo shuffle cross-participant.
+                m.rows.forEach((r) => {
+                  if (typeof r === "string") pool.push({ value: r, text: r });
+                  else pool.push({ value: r.value, text: r.text || r.value, required: r.required === true });
+                });
+              });
+              shuffleInPlace(pool);
+              // Ridistribuisco rispettando i chunk size originali
+              let idx = 0;
+              const meta = {};
+              matrices.forEach((m, mi) => {
+                const slice = pool.slice(idx, idx + sizes[mi]);
+                idx += sizes[mi];
+                m.rows = slice;
+                meta[m.name] = slice.map((s) => s.value);
+              });
+              // Salva seed + meta nel payload (campi protetti con underscore)
+              survey.mergeData({ _randomization_seed: seed, _randomization_meta: meta });
+            }
+          }
+        } catch (e) {
+          console.error("[nx-shuffle] failed:", e);
+        }
+
+        // === Salvataggio parziale (localStorage) ===
+        // Persistiamo data + pagina corrente cosi' un refresh / chiusura tab
+        // / crash del browser non perde il progresso. Chiave per
+        // questionario: niente conflitti fra studi diversi sullo stesso
+        // browser. Cleared al submit OK.
+        const STORAGE_KEY = "nx-research-progress:" + questionnaireId;
+        const STORAGE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 giorni
+
+        // Flag: quando true, saveProgressNow non scrive. Usato durante
+        // "Ricomincia" + reload per evitare che beforeunload re-salvi
+        // immediatamente cancellando l'effetto del clearProgress.
+        let skipSave = false;
+        function saveProgressNow() {
+          if (skipSave) return;
+          try {
+            const payload = JSON.stringify({
+              data: survey.data,
+              currentPageNo: survey.currentPageNo,
+              savedAt: Date.now(),
+              schemaSignature,
+            });
+            localStorage.setItem(STORAGE_KEY, payload);
+          } catch (e) { /* quota / private mode: silenzioso */ }
+        }
+        // schemaSignature: fingerprint stabile dello schema corrente.
+        // Se l'admin modifica lo schema (aggiunge/rinomina domande), la
+        // signature cambia → scartiamo il progresso salvato.
+        const schemaSignature = (function () {
+          try {
+            const pages = (schema.pages || []).map(function (p) {
+              const elNames = (p.elements || []).map(function (e) { return e.name + ":" + (e.type || ""); }).join(",");
+              return p.name + "[" + elNames + "]";
+            }).join("|");
+            return pages;
+          } catch (e) { return ""; }
+        })();
+
+        function loadProgress() {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== "object") return null;
+            if (parsed.savedAt && Date.now() - parsed.savedAt > STORAGE_TTL_MS) {
+              localStorage.removeItem(STORAGE_KEY);
+              return null;
+            }
+            // Se la signature dello schema e' cambiata, scartiamo: i dati
+            // salvati potrebbero non corrispondere piu' alle domande nuove.
+            if (parsed.schemaSignature && parsed.schemaSignature !== schemaSignature) {
+              localStorage.removeItem(STORAGE_KEY);
+              return null;
+            }
+            return parsed;
+          } catch (e) { return null; }
+        }
+        function clearProgress() {
+          skipSave = true; // blocca beforeunload/visibilitychange/onValueChanged
+          try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+        }
+
+        // Ripristina prima del render (carico i dati ma il modal blocca finche'
+        // l'utente non sceglie Continua o Ricomincia)
+        const saved = loadProgress();
+        const hasResumableData = saved && saved.data && Object.keys(saved.data).length > 0;
+        if (hasResumableData) {
+          try {
+            survey.data = saved.data;
+            if (typeof saved.currentPageNo === "number" && saved.currentPageNo > 0) {
+              survey.currentPageNo = saved.currentPageNo;
+            }
+            const modal = document.getElementById("nx-resume-modal");
+            const timeEl = document.getElementById("nx-resume-time");
+            if (modal) {
+              modal.classList.remove("hidden");
+              modal.classList.add("flex");
+              if (timeEl && saved.savedAt) {
+                const d = new Date(saved.savedAt);
+                timeEl.textContent = d.toLocaleDateString("it-IT") +
+                  " alle " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+              }
+            }
+          } catch (e) { /* schema diverso, ignora */ }
+        }
+
+        // Bottone "Continua" → chiude il modal
+        const resumeContinueBtn = document.getElementById("nx-resume-continue");
+        if (resumeContinueBtn) {
+          resumeContinueBtn.addEventListener("click", function () {
+            const modal = document.getElementById("nx-resume-modal");
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+          });
+        }
+        // Bottone "Ricomincia" → cancella progresso e reload
+        const resumeClearBtn = document.getElementById("nx-resume-clear");
+        if (resumeClearBtn) {
+          resumeClearBtn.addEventListener("click", function () {
+            clearProgress();
+            window.location.reload();
+          });
+        }
+
+        // Save debounce: 600ms dopo l'ultima modifica di valore.
+        let saveTimer = null;
+        function scheduleSave() {
+          if (saveTimer) clearTimeout(saveTimer);
+          saveTimer = setTimeout(saveProgressNow, 600);
+        }
+        survey.onValueChanged.add(scheduleSave);
+        // Page change: salva subito (non debounce)
+        survey.onCurrentPageChanged.add(saveProgressNow);
+        // Anche su blur della tab: salva immediato
+        window.addEventListener("beforeunload", saveProgressNow);
+        document.addEventListener("visibilitychange", function () {
+          if (document.visibilityState === "hidden") saveProgressNow();
+        });
+
+        // (handler onCurrentPageChanging unificato gestito piu' giu', vedi
+        //  "Per-page probing": blocca jump > 1 pagina E fa probing.)
+
+        // === Mappa question.name → root DOM element (per probing + matrix setup) ===
+        const questionDom = new Map();
+
+        // Helper: estrae il testo di una colonna matrix (puo' essere stringa o {value,text})
+        function colText(col) {
+          if (col == null) return "";
+          if (typeof col === "string") return col;
+          return col.text || col.value || "";
+        }
+
+        // Per le matrici, inietta data-col-label su ogni cella radio (escluso il
+        // primo td che e' la label di riga). Su mobile la CSS usa l'attr come
+        // pseudo-elemento ::before per mostrare l'etichetta inline.
+        function setupMobileMatrix(question, root) {
+          const cols = (question.columns || []).map(colText);
+          if (!cols.length) return;
+          const ncols = cols.length;
+          // Gap orizzontale fra celle in px. 8px per coppia.
+          const gapPx = 6;
+          const cellWidthCss = `calc((100% - ${gapPx * ncols}px) / ${ncols})`;
+
+          // Forza i wrapper SurveyJS a 100% larghezza
+          const wrappers = root.querySelectorAll(
+            "fieldset, .sd-question__content, .sd-element__content, .sd-table-wrapper",
+          );
+          wrappers.forEach((w) => {
+            w.style.width = "100%";
+            w.style.maxWidth = "100%";
+          });
+
+          const tables = root.querySelectorAll("table");
+          tables.forEach((tbl) => {
+            // Tabella → block 100%
+            tbl.style.display = "block";
+            tbl.style.width = "100%";
+            tbl.style.maxWidth = "100%";
+            tbl.style.tableLayout = "auto";
+            tbl.style.borderCollapse = "separate";
+            tbl.style.borderSpacing = "0";
+            tbl.style.fontSize = "0"; // elimina whitespace fra inline-block
+
+            const tbody = tbl.querySelector("tbody");
+            if (tbody) {
+              tbody.style.display = "block";
+              tbody.style.width = "100%";
+              tbody.style.fontSize = "0";
+            }
+
+            const rows = tbl.querySelectorAll("tbody > tr");
+            rows.forEach((tr) => {
+              // setProperty(prop, value, 'important') beats CSS !important.
+              // Necessario perche' la regola CSS .sd-question table > ...
+              // usa !important e altrimenti vince sul mio inline-style.
+              const setImp = (el, prop, val) => el.style.setProperty(prop, val, "important");
+
+              setImp(tr, "display", "block");
+              setImp(tr, "width", "100%");
+              setImp(tr, "max-width", "100%");
+              setImp(tr, "margin", "0 0 0.875rem 0");
+              setImp(tr, "padding", "0.875rem 1rem");
+              setImp(tr, "border", "1px solid rgba(101, 113, 121, 0.22)");
+              setImp(tr, "border-radius", "12px");
+              setImp(tr, "background", "#ffffff");
+              setImp(tr, "box-shadow", "0 1px 2px rgba(0, 0, 0, 0.03)");
+              setImp(tr, "box-sizing", "border-box");
+              setImp(tr, "font-size", "0");
+              setImp(tr, "text-align", "left");
+
+              const cells = tr.querySelectorAll(":scope > td");
+              // Prima cella (prompt): full width, block, font normale.
+              // Nero per leggibilita' massima sul testo dell'item.
+              if (cells[0]) {
+                setImp(cells[0], "display", "block");
+                setImp(cells[0], "width", "100%");
+                setImp(cells[0], "box-sizing", "border-box");
+                setImp(cells[0], "font-size", "0.95rem");
+                setImp(cells[0], "font-weight", "700");
+                setImp(cells[0], "color", "#1b2528");
+                setImp(cells[0], "padding", "0.1rem 0 0.65rem 0");
+                setImp(cells[0], "border", "none");
+                setImp(cells[0], "border-bottom", "1px solid rgba(101, 113, 121, 0.18)");
+                setImp(cells[0], "margin-bottom", "0.5rem");
+                setImp(cells[0], "text-align", "left");
+                setImp(cells[0], "white-space", "normal");
+              }
+              // Celle radio: inline-block, intera area cliccabile, colore
+              // delle label colonna in grigio chiaro.
+              for (let i = 1; i < cells.length; i++) {
+                setImp(cells[i], "display", "inline-block");
+                setImp(cells[i], "width", cellWidthCss);
+                setImp(cells[i], "box-sizing", "border-box");
+                setImp(cells[i], "padding", "0.45rem 0.25rem");
+                setImp(cells[i], "border", "none");
+                setImp(cells[i], "text-align", "center");
+                setImp(cells[i], "font-size", "0.7rem");
+                setImp(cells[i], "color", "#6b7280");
+                setImp(cells[i], "vertical-align", "top");
+                setImp(cells[i], "margin-right", i < cells.length - 1 ? gapPx + "px" : "0");
+                setImp(cells[i], "cursor", "pointer");
+                setImp(cells[i], "border-radius", "8px");
+                cells[i].setAttribute("data-col-label", cols[i - 1] || "");
+
+                // L'intera cella e' un click target per il radio interno.
+                // Se l'utente clicca sullo sfondo o sull'etichetta colonna,
+                // il radio viene selezionato.
+                if (!cells[i].dataset.nxClickBound) {
+                  cells[i].dataset.nxClickBound = "1";
+                  cells[i].addEventListener("click", function (e) {
+                    if (e.target.tagName === "INPUT" || e.target.closest("label")) return;
+                    const input = cells[i].querySelector("input[type=radio]");
+                    if (input && !input.checked) input.click();
+                  });
+                }
+              }
+
+            });
+          });
+
+          // === Equalize cell heights (passata su TUTTE le righe insieme) ===
+          // Le label colonna hanno lunghezze diverse ("Per nulla" vs
+          // "Ne' d'accordo ne' in disaccordo") quindi le celle hanno
+          // altezze diverse, e l'area cliccabile/hover risulta asimmetrica.
+          // Misuriamo l'altezza piu' alta DI OGNI RIGA dopo il paint e
+          // settiamo a tutte le celle della riga la stessa altezza.
+          // Uso setTimeout(50) + RAF combinati: piu' robusto del solo RAF
+          // doppio che a volte non fa scattare la callback su Chrome.
+          function equalizeAll() {
+            const allRows = root.querySelectorAll("table > tbody > tr");
+            allRows.forEach((tr) => {
+              const rowCells = tr.querySelectorAll(":scope > td");
+              let maxH = 0;
+              for (let i = 1; i < rowCells.length; i++) {
+                rowCells[i].style.removeProperty("height");
+                const h = rowCells[i].offsetHeight;
+                if (h > maxH) maxH = h;
+              }
+              if (maxH > 0) {
+                for (let i = 1; i < rowCells.length; i++) {
+                  rowCells[i].style.setProperty("height", maxH + "px", "important");
+                }
+              }
+            });
+          }
+          // Triple safety: RAF (per quando il paint e' veloce),
+          // setTimeout 50ms (per quando RAF non basta perche' SurveyJS
+          // sta ancora finendo il render), e un'altra a 250ms (per
+          // catturare eventuali re-layout asincroni).
+          requestAnimationFrame(equalizeAll);
+          setTimeout(equalizeAll, 50);
+          setTimeout(equalizeAll, 250);
+
+          // Rimuove eventuali overflow-x inline messi da SurveyJS
+          root.querySelectorAll("*").forEach((el) => {
+            const cs = el.style;
+            if (cs && (cs.overflowX === "auto" || cs.overflowX === "scroll")) {
+              cs.overflowX = "visible";
+            }
+          });
+        }
+
+        survey.onAfterRenderQuestion.add(function (sender, options) {
+          const q = options.question;
+          if (q && options.htmlElement) {
+            questionDom.set(q.name, options.htmlElement);
+            const t = (q.getType && q.getType()) || q.type;
+            if (t === "matrix" || t === "matrixdropdown" || t === "matrixdynamic") {
+              setupMobileMatrix(q, options.htmlElement);
+            }
+          }
+        });
+
+        // === Probing per pagina ===
+        // Al click di "Avanti" su una pagina con risposte mancanti (non-obb.),
+        // mostra banner di conferma. Ack tracciato per pagina cosi' l'utente
+        // non viene richiesto due volte sulla stessa pagina.
+        // Stesso meccanismo al click "Completa" (ultima pagina).
+        const pageProbingAcknowledged = new Set();
+        // Stato del prompt corrente, per orchestrare i click sui bottoni
+        // del banner.
+        let probingState = null; // { kind: 'page'|'complete', pageName, options }
+
+        function clearProbes() {
+          document.querySelectorAll(".nx-missing").forEach(function (el) {
+            removeMissingStyle(el);
+          });
+          document.querySelectorAll(".nx-probe-inline").forEach(function (el) {
+            el.remove();
+          });
+          document.getElementById("nx-probing-banner").classList.add("hidden");
+          // Reset del padding aggiunto quando il banner era visibile
+          document.body.style.paddingBottom = "";
+        }
+
+        // Restituisce la chiave logica di una riga matrix (string o {value})
+        function matrixRowKey(row) {
+          if (row == null) return "";
+          return typeof row === "string" ? row : (row.value || row.name || "");
+        }
+
+        // Per ogni question non-obbligatoria, ritorna il numero di "subitems"
+        // non risposti. Per le matrici conta le RIGHE vuote (SurveyJS considera
+        // la matrice non-empty se anche solo una riga e' compilata, quindi
+        // serve un check per riga). Marca anche gli elementi DOM coinvolti
+        // con .nx-missing per l'highlight giallo.
+        // Stili giallo "mancata risposta" applicati inline.
+        // Trick: Chrome ha un bug per cui il <tr> con display:block non
+        // dipinge background-color anche con !important inline. Workaround:
+        // usiamo box-shadow inset gigante (9999px) come pseudo-background.
+        // Il box-shadow su <tr> dipinge sempre correttamente.
+        function applyMissingStyle(el) {
+          if (!el) return;
+          el.classList.add("nx-missing");
+          el.style.setProperty(
+            "box-shadow",
+            "inset 0 0 0 9999px rgba(254, 240, 138, 0.55), inset 4px 0 0 9999px #facc15, 0 0 0 1px rgba(250, 204, 21, 0.5)",
+            "important",
+          );
+        }
+        function removeMissingStyle(el) {
+          if (!el) return;
+          el.classList.remove("nx-missing");
+          // Ripristina il box-shadow originale del card layout
+          el.style.setProperty("box-shadow", "0 1px 2px rgba(0, 0, 0, 0.03)", "important");
+        }
+
+        function probeQuestion(q) {
+          if (q.isRequired) return 0;
+          if (q.isVisible === false) return 0;
+          const root = questionDom.get(q.name);
+          const t = (q.getType && q.getType()) || q.type;
+
+          // Skip static/non-input element types: html, image, panel, expression,
+          // file, signaturepad — non hanno "risposta" da raccogliere.
+          const STATIC_TYPES = ["html", "image", "panel", "expression", "signaturepad"];
+          if (STATIC_TYPES.indexOf(t) !== -1) return 0;
+
+          if ((t === "matrix" || t === "matrixdropdown") && Array.isArray(q.rows) && q.rows.length > 0) {
+            const data = q.value || {};
+            let missingCount = 0;
+            const trs = root ? root.querySelectorAll("table > tbody > tr") : [];
+            q.rows.forEach(function (row, i) {
+              const key = matrixRowKey(row);
+              const v = data[key];
+              const isEmpty = v == null || v === "" || (typeof v === "object" && Object.keys(v).length === 0);
+              if (isEmpty) {
+                missingCount++;
+                if (trs[i]) applyMissingStyle(trs[i]);
+              }
+            });
+            return missingCount;
+          }
+
+          // Non-matrix: usa isEmpty()
+          if (q.isEmpty && q.isEmpty()) {
+            if (root) {
+              applyMissingStyle(root);
+              const inline = document.createElement("div");
+              inline.className = "nx-probe-inline";
+              inline.textContent = "You have not provided an answer to this question.";
+              root.prepend(inline);
+            }
+            return 1;
+          }
+          return 0;
+        }
+
+        // Helper: probe questo set di domande, mostra banner, ritorna true
+        // se ha trovato risposte mancanti e bloccato il flusso.
+        function runProbing(questions) {
+          clearProbes();
+          let totalMissing = 0;
+          let firstQuestionWithMissing = null;
+          questions.forEach(function (q) {
+            const n = probeQuestion(q);
+            if (n > 0) {
+              totalMissing += n;
+              if (!firstQuestionWithMissing) firstQuestionWithMissing = q;
+            }
+          });
+          if (totalMissing === 0) return false;
+
+          const banner = document.getElementById("nx-probing-banner");
+          banner.querySelector("[data-count]").textContent = totalMissing;
+          banner.querySelector("[data-domanda]").textContent =
+            totalMissing === 1 ? "answer" : "answers";
+          banner.classList.remove("hidden");
+
+          if (firstQuestionWithMissing) {
+            const el = questionDom.get(firstQuestionWithMissing.name);
+            if (el) {
+              const firstMissingTr = el.querySelector(".nx-missing") || el;
+              firstMissingTr.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+          return true;
+        }
+
+        // === REQUIRED CHECK per-item: blocco rosso per righe con required:true ===
+        // Diversamente dal probing giallo (skippable), questo BLOCCA la navigazione.
+        function clearRequiredHighlights() {
+          document.querySelectorAll(".nx-required").forEach(function (el) {
+            el.classList.remove("nx-required");
+            el.style.setProperty("box-shadow", "0 1px 2px rgba(0, 0, 0, 0.03)", "important");
+          });
+        }
+        function probeRequiredInQuestion(q) {
+          if (q.isVisible === false) return 0;
+          const root = questionDom.get(q.name);
+          const t = (q.getType && q.getType()) || q.type;
+          if ((t === "matrix" || t === "matrixdropdown") && Array.isArray(q.rows) && q.rows.length > 0) {
+            const data = q.value || {};
+            let missing = 0;
+            const trs = root ? root.querySelectorAll("table > tbody > tr") : [];
+            q.rows.forEach(function (row, i) {
+              if (!row || row.required !== true) return;
+              const key = matrixRowKey(row);
+              const v = data[key];
+              const empty = v == null || v === "" || (typeof v === "object" && Object.keys(v).length === 0);
+              if (empty) {
+                missing++;
+                if (trs[i]) {
+                  // Stile rosso (mutuamente esclusivo con il giallo)
+                  trs[i].classList.remove("nx-missing");
+                  trs[i].classList.add("nx-required");
+                }
+              }
+            });
+            return missing;
+          }
+          return 0;
+        }
+        function runRequiredCheck(questions) {
+          clearRequiredHighlights();
+          let total = 0;
+          let firstQ = null;
+          questions.forEach(function (q) {
+            const n = probeRequiredInQuestion(q);
+            if (n > 0) {
+              total += n;
+              if (!firstQ) firstQ = q;
+            }
+          });
+          if (total === 0) {
+            document.getElementById("nx-required-banner").classList.add("hidden");
+            return false;
+          }
+          const banner = document.getElementById("nx-required-banner");
+          banner.querySelector("[data-required-count]").textContent = total;
+          banner.querySelector("[data-required-domanda]").textContent =
+            total === 1 ? "required question" : "required questions";
+          banner.classList.remove("hidden");
+          if (firstQ) {
+            const el = questionDom.get(firstQ.name);
+            if (el) {
+              const firstMissing = el.querySelector(".nx-required") || el;
+              firstMissing.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+          return true;
+        }
+
+        // === onCurrentPageChanging: probing per pagina + lock jump > 1 ===
+        survey.onCurrentPageChanging.add(function (sender, options) {
+          const oldPage = options.oldCurrentPage;
+          const newPage = options.newCurrentPage;
+
+          // 1) Lock progress bar: solo navigazione sequenziale +-1
+          const delta = Math.abs(newPage.visibleIndex - oldPage.visibleIndex);
+          if (delta > 1) {
+            options.allow = false;
+            return;
+          }
+
+          // 1.b) Consenso bloccante: se la pagina che stiamo lasciando contiene
+          // boolean question con nome che inizia per "consent_", e una di esse
+          // è false → blocca. Belt-and-suspenders rispetto ai validators dello
+          // schema, per zero ambiguità.
+          if (newPage.visibleIndex > oldPage.visibleIndex) {
+            const consentQs = (oldPage.questions || []).filter(function (q) {
+              return q.name && q.name.indexOf("consent_") === 0 && q.getType && q.getType() === "boolean";
+            });
+            if (consentQs.length > 0) {
+              for (const q of consentQs) {
+                if (q.value !== true) {
+                  options.allow = false;
+                  // Forza l'errore visibile sul campo
+                  try { q.addError(new Survey.SurveyError("You must confirm to proceed.")); } catch (e) {}
+                  // Scroll al primo consent non spuntato
+                  try {
+                    const el = document.querySelector('[data-name="' + q.name + '"]');
+                    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  } catch (e) {}
+                  return;
+                }
+              }
+            }
+          }
+
+          // 2) Se sto andando INDIETRO (Prev), nessun probing
+          if (newPage.visibleIndex < oldPage.visibleIndex) return;
+
+          // 2.b) REQUIRED CHECK per-item: blocco rosso non superabile.
+          //      Va PRIMA del probing giallo (skip giallo se ci sono required mancanti).
+          const reqMissing = runRequiredCheck(oldPage.questions || []);
+          if (reqMissing) {
+            options.allow = false;
+            document.body.style.paddingBottom = "180px";
+            return;
+          }
+
+          // 3) Pagina gia' confermata: lascia passare
+          if (pageProbingAcknowledged.has(oldPage.name)) return;
+
+          // 4) Probe sulle domande della pagina che sto LASCIANDO
+          const questions = oldPage.questions || [];
+          const hasMissing = runProbing(questions);
+          if (hasMissing) {
+            options.allow = false;
+            probingState = { kind: "page", pageName: oldPage.name };
+            // Padding-bottom al body cosi' il banner sticky non copre il
+            // bottone Avanti / il contenuto sotto.
+            document.body.style.paddingBottom = "180px";
+          }
+        });
+
+        // === onCompleting: probing finale (ultima pagina alla submit) ===
+        survey.onCompleting.add(function (sender, options) {
+          // Se l'utente ha gia' confermato di completare comunque, lascia passare
+          if (probingState && probingState.kind === "complete" && probingState.acknowledged) return;
+
+          const lastPage = sender.currentPage;
+          const questions = lastPage ? (lastPage.questions || []) : [];
+
+          // REQUIRED CHECK su tutto il survey (defensive: page-by-page dovrebbe
+          // gia' aver bloccato, ma controlliamo anche in submit per paranoia)
+          const allQuestions = sender.getAllQuestions ? sender.getAllQuestions() : questions;
+          const reqMissing = runRequiredCheck(allQuestions);
+          if (reqMissing) {
+            options.allow = false;
+            document.body.style.paddingBottom = "180px";
+            return;
+          }
+
+          // Se l'ultima pagina non ha gia' confermato il probing, controlla
+          if (pageProbingAcknowledged.has(lastPage.name)) return;
+
+          const hasMissing = runProbing(questions);
+          if (hasMissing) {
+            options.allow = false;
+            probingState = { kind: "complete", pageName: lastPage.name };
+            document.body.style.paddingBottom = "180px";
+          }
+        });
+
+        // Quando l'utente risponde a una domanda evidenziata, rimuove l'highlight.
+        // Per matrici, controlla la singola riga risposta (non l'intera domanda).
+        survey.onValueChanged.add(function (sender, options) {
+          const root = questionDom.get(options.name);
+          if (!root) return;
+          const q = sender.getQuestionByName ? sender.getQuestionByName(options.name) : null;
+          const t = q && q.getType ? q.getType() : null;
+          if ((t === "matrix" || t === "matrixdropdown") && q && Array.isArray(q.rows)) {
+            const data = options.value || {};
+            const trs = root.querySelectorAll("table > tbody > tr");
+            q.rows.forEach(function (row, i) {
+              const key = matrixRowKey(row);
+              const v = data[key];
+              if (v != null && v !== "" && trs[i]) {
+                if (trs[i].classList.contains("nx-missing")) removeMissingStyle(trs[i]);
+                if (trs[i].classList.contains("nx-required")) {
+                  trs[i].classList.remove("nx-required");
+                  trs[i].style.setProperty("box-shadow", "0 1px 2px rgba(0, 0, 0, 0.03)", "important");
+                }
+              }
+            });
+            // Se non ci sono piu' righe required missing sulla pagina, nascondi banner
+            try {
+              const pageQs = (sender.currentPage && sender.currentPage.questions) || [];
+              let stillMissing = 0;
+              pageQs.forEach(function (pq) {
+                if (pq.getType && pq.getType() === "matrix" && Array.isArray(pq.rows)) {
+                  const d = pq.value || {};
+                  pq.rows.forEach(function (rr) {
+                    if (rr && rr.required === true) {
+                      const k = matrixRowKey(rr);
+                      const vv = d[k];
+                      if (vv == null || vv === "") stillMissing++;
+                    }
+                  });
+                }
+              });
+              if (stillMissing === 0) {
+                document.getElementById("nx-required-banner").classList.add("hidden");
+                document.body.style.paddingBottom = "";
+              }
+            } catch (e) {}
+          } else {
+            if (root.classList.contains("nx-missing")) {
+              removeMissingStyle(root);
+              const inline = root.querySelector(".nx-probe-inline");
+              if (inline) inline.remove();
+            }
+          }
+        });
+
+        // Bottoni banner probing — comportamento context-aware
+        document.getElementById("nx-probing-yes").addEventListener("click", function () {
+          if (!probingState) return;
+          // Marca la pagina come confermata cosi' il prossimo click Avanti
+          // (o Complete) non ri-mostra il banner.
+          pageProbingAcknowledged.add(probingState.pageName);
+          clearProbes();
+          if (probingState.kind === "complete") {
+            probingState.acknowledged = true;
+            if (typeof survey.completeLastPage === "function") survey.completeLastPage();
+            else if (typeof survey.tryComplete === "function") survey.tryComplete();
+            else if (typeof survey.doComplete === "function") survey.doComplete();
+          } else {
+            // page mode → vai alla pagina successiva
+            probingState = null;
+            survey.nextPage();
+          }
+        });
+        document.getElementById("nx-probing-no").addEventListener("click", function () {
+          // Chiude solo il banner ma lascia gli highlight visibili: l'utente
+          // resta sulla pagina e puo' compilare le righe mancate.
+          document.getElementById("nx-probing-banner").classList.add("hidden");
+          document.body.style.paddingBottom = "";
+          probingState = null;
+        });
+
+        // Banner ROSSO (required-missing): chiusura semplice, l'highlight resta
+        // visibile finche' l'utente non compila la riga (gestito in onValueChanged).
+        document.getElementById("nx-required-close").addEventListener("click", function () {
+          document.getElementById("nx-required-banner").classList.add("hidden");
+          document.body.style.paddingBottom = "";
+        });
 
         survey.onComplete.add(async function (sender) {
           const payload = sender.data;
@@ -106,17 +1235,38 @@ const questionnaireId = questionnaire.id;
             const data = await res.json();
             if (!res.ok || !data.ok) {
               document.getElementById("submit-error").textContent =
-                "Errore invio: " + (data.error || res.status);
+                "Submission error: " + (data.error || res.status);
               document.getElementById("submit-error").classList.remove("hidden");
               sender.showCompletedPage = false;
               return;
             }
+            // Submit OK → cancella il progresso salvato in localStorage
+            clearProgress();
             // Mostra pannello grazie con completion code
             document.getElementById("completion-code").textContent = data.completionCode;
             document.getElementById("thankyou").classList.remove("hidden");
+            // Prolific: se l'utente è arrivato via Prolific (PROLIFIC_PID nella URL)
+            // E lo studio ha un completion URL configurato, nascondi il completion
+            // code e mostra il bottone "Return to Prolific". Chi accede senza
+            // PROLIFIC_PID vede il completion code standard.
+            try {
+              const prolificUrl = prolificCompletionUrl || "";
+              if (window.__nx_prolific_mode && prolificUrl) {
+                // Supporta placeholder {COMPLETION_CODE} nella URL
+                const finalUrl = prolificUrl.replace(/\{COMPLETION_CODE\}/g, encodeURIComponent(data.completionCode));
+                const link = document.getElementById("prolific-return-link");
+                if (link) link.href = finalUrl;
+                const urlText = document.getElementById("prolific-return-url");
+                if (urlText) urlText.textContent = finalUrl;
+                document.getElementById("prolific-return").classList.remove("hidden");
+                // Nascondi il completion code (irrilevante per i partecipanti Prolific)
+                const codeBox = document.getElementById("completion-code-box");
+                if (codeBox) codeBox.classList.add("hidden");
+              }
+            } catch (e) {}
             document.getElementById("thankyou").scrollIntoView({ behavior: "smooth" });
           } catch (err) {
-            document.getElementById("submit-error").textContent = "Errore di rete";
+            document.getElementById("submit-error").textContent = "Network error";
             document.getElementById("submit-error").classList.remove("hidden");
           }
         });
@@ -133,7 +1283,7 @@ const questionnaireId = questionnaire.id;
       } catch (e) {
         console.error(e);
         const err = document.getElementById("submit-error");
-        err.textContent = "Errore caricamento questionario: " + (e && e.message ? e.message : e);
+        err.textContent = "Error loading questionnaire: " + (e && e.message ? e.message : e);
         err.classList.remove("hidden");
       }
     })();

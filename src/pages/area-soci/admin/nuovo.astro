@@ -1,0 +1,406 @@
+---
+/**
+ * Form completo per aggiungere un nuovo socio.
+ *
+ * Raccoglie tutte le info richieste dal Codice del Terzo Settore
+ * (D.Lgs. 117/2017 art. 15 - libro associati) + GDPR + dati per il
+ * profilo pubblico sul sito (Chi siamo).
+ *
+ * Workflow:
+ *   1) Submit JSON con tutti i campi → POST /api/admin/members?full=1
+ *      → crea users + profiles + member_data + applica i timestamp dei consensi
+ *   2) Se foto selezionata, upload separato → POST /api/admin/members/:id/photo
+ *   3) Redirect a /area-soci/admin/:id
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getUser } from "../../../server/guards";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const today = new Date().toISOString().slice(0, 10);
+---
+
+<AreaSociLayout title="Nuova iscrizione — Amministrazione" active="admin">
+  <a href="/area-soci/admin" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">
+    ← Torna alla lista
+  </a>
+
+  <div class="mt-4">
+    <h2 class="text-2xl font-bold text-nx-dark">Nuova iscrizione</h2>
+    <p class="mt-1 text-sm text-nx-gray-dark">
+      Compilazione completa: anagrafica, residenza, iscrizione, consensi GDPR e
+      profilo pubblico. Tutti i dati sono trattati secondo l'informativa privacy
+      di NexLudica APS.
+    </p>
+  </div>
+
+  <form id="new-member-form" class="mt-8 space-y-6" enctype="multipart/form-data">
+
+    <!-- ===== SEZIONE 1: ANAGRAFICA ===== -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <div class="flex items-baseline justify-between gap-3">
+        <h3 class="text-base font-bold text-nx-dark">1. Anagrafica</h3>
+        <span class="text-xs text-nx-gray-dark">Obbligatoria per il libro soci</span>
+      </div>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Richiesta dall'art. 15 D.Lgs. 117/2017 (Codice del Terzo Settore).
+      </p>
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Nome e cognome <span class="text-red-500">*</span></label>
+          <input name="name" required maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Codice fiscale <span class="text-red-500">*</span></label>
+          <input name="fiscalCode" required maxlength="16" pattern="[A-Za-z0-9]{16}" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm uppercase focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <p id="fc-feedback" class="mt-1 text-xs"></p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Data di nascita <span class="text-red-500">*</span></label>
+          <input type="date" name="birthDate" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Luogo di nascita <span class="text-red-500">*</span></label>
+          <input name="birthPlace" required placeholder="es. Genova (GE)" maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Cittadinanza</label>
+          <input name="citizenship" value="Italiana" maxlength="60" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Telefono</label>
+          <input name="phone" type="tel" maxlength="32" placeholder="+39 ..." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SEZIONE 2: RESIDENZA ===== -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">2. Residenza</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Indirizzo completo come da carta d'identita'.</p>
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Indirizzo <span class="text-red-500">*</span></label>
+          <input name="address" required placeholder="es. Via Roma 12" maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Comune <span class="text-red-500">*</span></label>
+          <input name="city" required maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">CAP <span class="text-red-500">*</span></label>
+          <input name="postalCode" required maxlength="10" pattern="[0-9A-Za-z]+" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Provincia <span class="text-red-500">*</span></label>
+          <input name="province" required maxlength="3" placeholder="GE" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm uppercase focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Paese</label>
+          <input name="country" value="IT" maxlength="3" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm uppercase focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SEZIONE 3: ACCESSO E ISCRIZIONE ===== -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">3. Iscrizione e accesso</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        L'email serve sia come contatto legale sia per l'accesso all'area soci.
+      </p>
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Email <span class="text-red-500">*</span></label>
+          <input type="email" name="email" required maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ruolo nella piattaforma <span class="text-red-500">*</span></label>
+          <select name="role" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">
+            <option value="member" selected>Socio</option>
+            <option value="collaborator">Collaboratore</option>
+            <option value="admin">Admin (presidente / consiglio)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Stato iscrizione</label>
+          <select name="membershipStatus" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">
+            <option value="active" selected>Attivo</option>
+            <option value="pending">In attesa di approvazione</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Data iscrizione</label>
+          <input type="date" name="membershipDate" value={today} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Etichetta ruolo (pubblica)</label>
+          <input name="roleLabel" placeholder="es. Presidente, Game designer" maxlength="80" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SEZIONE 4: QUOTA ===== -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">4. Quota associativa</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Facoltativa: puoi registrarla anche piu' tardi.</p>
+      <div class="mt-4 grid gap-5 sm:grid-cols-3">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Data versamento</label>
+          <input type="date" name="lastPaymentDate" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Importo (€)</label>
+          <input type="number" step="0.01" min="0" name="lastPaymentAmount" placeholder="0.00" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Modalita'</label>
+          <input name="paymentNotes" placeholder="es. Bonifico, contanti, PayPal" maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SEZIONE 5: PROFILO PUBBLICO ===== -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <div class="flex items-baseline justify-between gap-3">
+        <h3 class="text-base font-bold text-nx-dark">5. Profilo pubblico (Chi siamo)</h3>
+        <span class="text-xs text-nx-gray-dark">Facoltativo, modificabile dalla persona socia</span>
+      </div>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Questi dati appariranno sulla pagina "Chi siamo" del sito, solo se il
+        la persona consente la pubblicazione (vedi sezione 6).
+      </p>
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Foto profilo</label>
+          <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" class="mt-1 block w-full rounded-lg border border-dashed border-nx-gray-light/40 bg-nx-off-white px-3 py-2 text-sm" />
+          <p class="mt-1 text-xs text-nx-gray-dark">JPG / PNG / WebP, max 5 MB. Idealmente quadrata, 400×400 o piu'.</p>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Bio breve</label>
+          <textarea name="bio" rows="3" maxlength="1000" placeholder="Una frase su chi e' e cosa fa nel team..." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Competenze</label>
+          <input name="skills" placeholder="es. Psicometria, Game design, Lavoro sociale" maxlength="400" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <p class="mt-1 text-xs text-nx-gray-dark">Separa le competenze con una virgola.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Sito web</label>
+          <input type="url" name="website" placeholder="https://..." maxlength="300" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Instagram</label>
+          <input type="url" name="instagram" placeholder="https://instagram.com/..." maxlength="300" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== SEZIONE 6: CONSENSI GDPR ===== -->
+    <section class="rounded-xl border-2 border-amber-300 bg-amber-50/30 p-6">
+      <h3 class="text-base font-bold text-nx-dark">6. Consensi GDPR</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Obbligatori per legge (Reg. UE 2016/679 e D.Lgs. 196/2003). Senza i
+        consensi necessari la registrazione non puo' essere completata.
+      </p>
+      <div class="mt-4 space-y-3">
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+          <input type="checkbox" name="consentPrivacyAt" value="1" required class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-xs text-nx-gray-dark leading-relaxed">
+            <strong>Informativa privacy</strong> — La persona socia dichiara di aver letto e accettato l'<a href="/privacy-policy" target="_blank" class="text-nx-cyan underline">informativa privacy</a> ai sensi dell'art. 13 del Reg. UE 2016/679.
+            <span class="text-red-500">*</span>
+          </span>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+          <input type="checkbox" name="consentStatuteAt" value="1" required class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-xs text-nx-gray-dark leading-relaxed">
+            <strong>Statuto associativo</strong> — La persona socia dichiara di aver preso visione e di accettare lo statuto di NexLudica APS.
+            <span class="text-red-500">*</span>
+          </span>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+          <input type="checkbox" name="consentPhotoPublicationAt" value="1" class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-xs text-nx-gray-dark leading-relaxed">
+            <strong>Pubblicazione profilo sul sito</strong> — La persona socia acconsente alla pubblicazione di foto, nome, ruolo e bio sulla pagina "Chi siamo" del sito nexludica.org. Consenso revocabile in qualsiasi momento.
+          </span>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+          <input type="checkbox" name="consentMarketingAt" value="1" class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-xs text-nx-gray-dark leading-relaxed">
+            <strong>Newsletter e comunicazioni</strong> — La persona socia acconsente a ricevere comunicazioni informative e newsletter dall'associazione.
+          </span>
+        </label>
+      </div>
+      <p class="mt-3 text-xs text-nx-gray-dark">
+        Il consenso al trattamento dati per finalita' associative e contabili (libro
+        soci, quote, obblighi fiscali ex art. 16 D.Lgs. 117/2017) non richiede
+        consenso esplicito: il trattamento e' necessario all'esecuzione del
+        contratto associativo e ad adempimenti di legge.
+      </p>
+    </section>
+
+    <!-- Visibilita' pubblica (legata al consenso foto) -->
+    <section class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/30 p-6">
+      <h3 class="text-base font-bold text-nx-dark">7. Visibilita' iniziale</h3>
+      <div class="mt-3 space-y-3">
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white/60 p-3 transition hover:bg-white">
+          <input type="checkbox" name="publicVisible" value="1" checked class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-xs text-nx-gray-dark leading-relaxed">Mostra il profilo su "Chi siamo" (richiede consenso pubblicazione)</span>
+        </label>
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white/60 p-3 transition hover:bg-white">
+          <input type="checkbox" name="emailPublic" value="1" class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+          <span class="text-xs text-nx-gray-dark leading-relaxed">Mostra anche l'email sul profilo pubblico</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Note interne -->
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Note interne</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Visibili solo agli admin. Mai esposte pubblicamente.</p>
+      <textarea name="internalNotes" rows="3" maxlength="1000" class="mt-3 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+    </section>
+
+    <!-- Actions -->
+    <div class="flex flex-wrap items-center gap-4">
+      <button type="submit" id="submit-btn" class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50 disabled:cursor-not-allowed">
+        Crea iscrizione
+      </button>
+      <a href="/area-soci/admin" class="text-sm text-nx-gray-dark no-underline hover:text-nx-cyan">
+        Annulla
+      </a>
+      <span id="form-status" class="text-sm"></span>
+    </div>
+  </form>
+</AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("new-member-form");
+    const statusEl = document.getElementById("form-status");
+    const submitBtn = document.getElementById("submit-btn");
+    const fcInput = form.querySelector('input[name="fiscalCode"]');
+    const fcFeedback = document.getElementById("fc-feedback");
+
+    // === Validazione live codice fiscale (formato + checksum) ===
+    // Algoritmo replicato lato client per UX immediato. Il check autoritativo
+    // resta server-side in /api/admin/members.
+    const FC_FORMAT = /^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-EHLMPR-T][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/;
+    const ODD = {"0":1,"1":0,"2":5,"3":7,"4":9,"5":13,"6":15,"7":17,"8":19,"9":21,A:1,B:0,C:5,D:7,E:9,F:13,G:15,H:17,I:19,J:21,K:2,L:4,M:18,N:20,O:11,P:3,Q:6,R:8,S:12,T:14,U:16,V:10,W:22,X:25,Y:24,Z:23};
+    const EVEN = {"0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,A:0,B:1,C:2,D:3,E:4,F:5,G:6,H:7,I:8,J:9,K:10,L:11,M:12,N:13,O:14,P:15,Q:16,R:17,S:18,T:19,U:20,V:21,W:22,X:23,Y:24,Z:25};
+    function validateFc(input) {
+      const cf = (input || "").trim().toUpperCase().replace(/\s+/g, "");
+      if (cf.length === 0) return { ok: null };
+      if (cf.length !== 16) return { ok: false, msg: "Deve essere lungo 16 caratteri" };
+      if (!FC_FORMAT.test(cf)) return { ok: false, msg: "Formato non valido" };
+      let sum = 0;
+      for (let i = 0; i < 15; i++) {
+        const ch = cf[i];
+        const v = i % 2 === 0 ? ODD[ch] : EVEN[ch];
+        if (v === undefined) return { ok: false, msg: "Carattere non valido" };
+        sum += v;
+      }
+      const check = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[sum % 26];
+      if (check !== cf[15]) return { ok: false, msg: "Cifra di controllo errata" };
+      return { ok: true, msg: "✓ Codice fiscale valido" };
+    }
+    fcInput.addEventListener("input", () => {
+      fcInput.value = fcInput.value.toUpperCase();
+      const r = validateFc(fcInput.value);
+      if (r.ok === null) {
+        fcFeedback.textContent = "";
+        fcFeedback.className = "mt-1 text-xs";
+      } else if (r.ok) {
+        fcFeedback.textContent = r.msg;
+        fcFeedback.className = "mt-1 text-xs text-emerald-600";
+      } else {
+        fcFeedback.textContent = r.msg;
+        fcFeedback.className = "mt-1 text-xs text-red-600";
+      }
+    });
+
+    // === Submit ===
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      statusEl.textContent = "Salvataggio in corso...";
+      statusEl.className = "text-sm text-nx-gray-dark";
+
+      // Validazione finale codice fiscale
+      const fcCheck = validateFc(fcInput.value);
+      if (fcCheck.ok === false) {
+        statusEl.textContent = "Codice fiscale non valido: " + fcCheck.msg;
+        statusEl.className = "text-sm text-red-600";
+        submitBtn.disabled = false;
+        return;
+      }
+
+      const fd = new FormData(form);
+      const photoFile = fd.get("photo");
+      // Costruisci payload JSON escludendo il file
+      const body = {};
+      for (const [k, v] of fd.entries()) {
+        if (k === "photo") continue;
+        body[k] = v;
+      }
+      // Checkbox: normalizza a "1"/"0"
+      ["publicVisible", "emailPublic", "consentPrivacyAt", "consentStatuteAt", "consentPhotoPublicationAt", "consentMarketingAt"].forEach((k) => {
+        body[k] = fd.has(k) ? "1" : "0";
+      });
+
+      try {
+        // 1) Crea utente
+        const res = await fetch("/api/admin/members?full=1", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          statusEl.textContent = "Errore: " + (data.error || res.status);
+          statusEl.className = "text-sm text-red-600";
+          submitBtn.disabled = false;
+          return;
+        }
+        const newUserId = data.user.id;
+
+        // 2) Upload foto (se presente). Wrapped in try/catch separato:
+        // anche se l'upload fallisce in modo strano (JSON malformato, network
+        // morto a meta'), proseguiamo al redirect — il socio e' gia' creato.
+        if (photoFile && photoFile instanceof File && photoFile.size > 0) {
+          statusEl.textContent = "Upload foto in corso...";
+          try {
+            const pfd = new FormData();
+            pfd.append("photo", photoFile);
+            const pres = await fetch("/api/admin/members/" + encodeURIComponent(newUserId) + "/photo", {
+              method: "POST",
+              body: pfd,
+            });
+            const pdata = await pres.json().catch(() => ({}));
+            if (!pres.ok || !pdata.ok) {
+              statusEl.textContent = "Socio creato ma upload foto fallito: " + (pdata.error || pres.status);
+              statusEl.className = "text-sm text-amber-600";
+            }
+          } catch (photoErr) {
+            statusEl.textContent = "Socio creato ma upload foto fallito (rete)";
+            statusEl.className = "text-sm text-amber-600";
+          }
+        }
+
+        // 3) Redirect alla pagina dettaglio del nuovo socio
+        statusEl.textContent = "✓ Socio creato. Redirect...";
+        statusEl.className = "text-sm text-emerald-600";
+        setTimeout(() => {
+          window.location.href = "/area-soci/admin/" + encodeURIComponent(newUserId);
+        }, 700);
+      } catch (err) {
+        statusEl.textContent = "Errore di rete: " + (err && err.message ? err.message : err);
+        statusEl.className = "text-sm text-red-600";
+        submitBtn.disabled = false;
+      }
+    });
+  })();
+</script>

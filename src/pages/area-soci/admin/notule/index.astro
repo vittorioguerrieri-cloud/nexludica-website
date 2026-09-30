@@ -1,0 +1,681 @@
+---
+/**
+ * Hub Notule e compensi (solo admin).
+ * Fase 1: pool marche da bollo funzionante; le altre schede (Notule, Lettere
+ * d'incarico, CU) sono predisposte e verranno completate nelle fasi successive.
+ */
+import AreaSociLayout from "../../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../../server/db";
+import { getUser } from "../../../../server/guards";
+import { listBolliWithNotes, bolliCounts } from "../../../../server/bolli";
+import { listIncarichi } from "../../../../server/incarichi";
+import { listPaymentNotesWithPerson, formatEur, notulaNumeroDisplay, listNotuleYears, getCUSummary } from "../../../../server/payments";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+const bolli = db ? await listBolliWithNotes(db) : [];
+const counts = db ? await bolliCounts(db) : { total: 0, available: 0, used: 0 };
+const incarichi = db ? await listIncarichi(db) : [];
+const notule = db ? await listPaymentNotesWithPerson(db) : [];
+const noteStatusLabel: Record<string, { label: string; cls: string }> = {
+  draft: { label: "Bozza", cls: "bg-nx-gray-light/30 text-nx-gray-dark" },
+  sent_for_signature: { label: "In firma", cls: "bg-amber-100 text-amber-800" },
+  signed: { label: "Firmata", cls: "bg-sky-100 text-sky-800" },
+  paid: { label: "Pagata", cls: "bg-emerald-100 text-emerald-800" },
+  void: { label: "Annullata", cls: "bg-red-100 text-red-700" },
+};
+const members = db
+  ? ((await db.prepare("SELECT id, name FROM users WHERE active = 1 ORDER BY name").all<{ id: string; name: string }>()).results ?? [])
+  : [];
+
+const siteBase = ((env as Env).SITE_URL ?? "https://nexludica.org").replace(/\/$/, "");
+
+// CU: anni disponibili + riepilogo dell'anno più recente
+const cuYears = db ? await listNotuleYears(db) : [];
+const cuYear = cuYears[0] ?? new Date().getUTCFullYear();
+const cuRows = db ? await getCUSummary(db, cuYear) : [];
+
+// Dati per i modali di modifica (solo bozze)
+const notuleEdit = Object.fromEntries(
+  notule.filter((n) => n.status === "draft").map((n) => [n.id, {
+    person_name: (n as any).person_name, date: n.date, service_description: n.service_description,
+    project_code: n.project_code, amount_gross: n.amount_gross, withholding_percentage: n.withholding_percentage,
+    taxable_percentage: n.taxable_percentage, service_period_start: n.service_period_start,
+    service_period_end: n.service_period_end, hours: n.hours, notes: n.notes,
+  }]),
+);
+const incarichiEdit = Object.fromEntries(
+  incarichi.filter((i) => i.status === "draft").map((i) => [i.id, {
+    person_name: (i as any).person_name, project_label: i.project_label, object_description: i.object_description,
+    period_from: i.period_from, period_to: i.period_to, hours: i.hours, hourly_rate: i.hourly_rate,
+    compenso_total: i.compenso_total, notes: i.notes,
+  }]),
+);
+
+const incStatusLabel: Record<string, { label: string; cls: string }> = {
+  draft: { label: "Bozza", cls: "bg-nx-gray-light/30 text-nx-gray-dark" },
+  sent_for_signature: { label: "In firma", cls: "bg-amber-100 text-amber-800" },
+  signed: { label: "Firmata", cls: "bg-emerald-100 text-emerald-800" },
+  void: { label: "Annullata", cls: "bg-red-100 text-red-700" },
+};
+
+function fmtDate(ts: number) {
+  return new Date(ts).toLocaleDateString("it-IT", { day: "2-digit", month: "short", year: "numeric" });
+}
+---
+
+<AreaSociLayout title="Notule e compensi — Amministrazione" active="notule">
+  <div>
+    <h2 class="text-2xl font-bold text-nx-dark">Notule e compensi</h2>
+    <p class="mt-1 text-sm text-nx-gray-dark">
+      Pagamenti con ritenuta d'acconto: lettere d'incarico, notule, marche da bollo, pagamenti e CU.
+    </p>
+  </div>
+
+  <div class="mt-6 flex flex-wrap gap-1 border-b border-nx-gray-light/30">
+    <button type="button" data-tab="notule" class="nx-tab nx-tab-active rounded-t-md border-b-2 border-nx-cyan px-4 py-2 text-sm font-semibold text-nx-cyan">Notule</button>
+    <button type="button" data-tab="incarichi" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">Lettere d'incarico</button>
+    <button type="button" data-tab="bolli" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">Marche da bollo <span class="ml-1 text-xs">({counts.available}/{counts.total})</span></button>
+    <button type="button" data-tab="cu" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">CU</button>
+  </div>
+
+  <!-- NOTULE (fase 3) -->
+  <section data-panel="notule" class="nx-panel mt-6 space-y-6">
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Nuova notula (ritenuta d'acconto)</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Il netto è <strong>lordo − ritenuta</strong>. La marca da bollo (2€ se lordo &gt; 77,47€) è a carico di NexLudica e viene apposta automaticamente all'invio in firma (servono marche nel pool: {counts.available} disponibili).</p>
+      <form id="note-form" class="mt-4 grid gap-3 sm:grid-cols-2">
+        <label class="block text-sm">
+          <span class="font-medium text-nx-dark">Percipiente</span>
+          <select name="user_id" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+            <option value="">— seleziona —</option>
+            {members.map((m) => <option value={m.id}>{m.name}</option>)}
+          </select>
+        </label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Data</span><input name="date" type="date" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Prestazione</span><input name="service_description" required maxlength="500" placeholder="es. Conduzione talk, sviluppo materiali…" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Progetto / CIG (opz.)</span><input name="project_code" maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Compenso lordo €</span><input name="amount_gross" id="nf-gross" type="number" step="0.01" min="0" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Ritenuta %</span><input name="withholding_percentage" id="nf-wh" type="number" step="0.01" value="20" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Imponibile %</span><input name="taxable_percentage" id="nf-tx" type="number" step="0.01" value="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <div class="sm:col-span-2 rounded-lg bg-white p-3 text-sm">
+          <div class="flex justify-between"><span class="text-nx-gray-dark">Ritenuta</span><span id="nf-prev-wh" class="font-mono">—</span></div>
+          <div class="flex justify-between"><span class="text-nx-gray-dark">Marca da bollo (NexLudica)</span><span id="nf-prev-bollo" class="font-mono">—</span></div>
+          <div class="mt-1 flex justify-between border-t border-nx-gray-light/20 pt-1 font-bold"><span>Netto al percipiente</span><span id="nf-prev-net" class="font-mono text-nx-cyan">—</span></div>
+        </div>
+        <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">Crea notula</button>
+          <span id="note-status" class="text-xs"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-nx-gray-light/20 px-6 py-4">
+        <h3 class="text-base font-bold text-nx-dark">Notule ({notule.length})</h3>
+        <div class="flex items-center gap-2">
+          <button type="button" id="reconcile-btn" class="rounded-lg border border-nx-cyan/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan hover:text-white">Riconcilia col bilancio</button>
+          <span id="reconcile-status" class="text-xs"></span>
+        </div>
+      </div>
+      {notule.length === 0 ? (
+        <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessuna notula ancora.</p>
+      ) : (
+        <div class="divide-y divide-nx-gray-light/20">
+          {notule.map((nt) => {
+            const st = noteStatusLabel[nt.status] ?? noteStatusLabel.draft;
+            return (
+              <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-3" data-note-row data-note-id={nt.id}>
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-nx-dark">Notula {notulaNumeroDisplay(nt)}/{nt.year} — {nt.person_name}</p>
+                  <p class="text-[11px] text-nx-gray-dark">{nt.date} · lordo {formatEur(nt.amount_gross)} · ritenuta {formatEur(nt.withholding_amount)} · netto {formatEur(nt.amount_net)}{nt.bollo_required ? " · bollo 2€ (NexLudica)" : ""}</p>
+                  {(nt.status === "signed" || nt.status === "paid") && (
+                    <p class="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+                      <span class="uppercase tracking-wider text-nx-gray-dark">Pagamento:</span>
+                      <button type="button" data-pay-toggle data-id={nt.id} data-leg="person" data-paid={nt.paid_person_at ? "1" : "0"}
+                        class={`rounded-full px-2 py-0.5 font-semibold ${nt.paid_person_at ? "bg-emerald-100 text-emerald-800" : "bg-nx-gray-light/30 text-nx-gray-dark"}`}>
+                        Persona {nt.paid_person_at ? "✓" : "—"}
+                      </button>
+                      {nt.withholding_amount > 0 && (
+                        <button type="button" data-pay-toggle data-id={nt.id} data-leg="f24" data-paid={nt.f24_paid_at ? "1" : "0"}
+                          class={`rounded-full px-2 py-0.5 font-semibold ${nt.f24_paid_at ? "bg-emerald-100 text-emerald-800" : "bg-nx-gray-light/30 text-nx-gray-dark"}`}>
+                          F24 {nt.f24_paid_at ? "✓" : "—"}
+                        </button>
+                      )}
+                    </p>
+                  )}
+                </div>
+                <div class="flex items-center gap-2 text-xs">
+                  <span class={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${st.cls}`}>{st.label}</span>
+                  <a href={`/api/admin/notule/${nt.id}/pdf`} target="_blank" rel="noopener noreferrer" class="rounded border border-nx-gray-light/40 px-2 py-1 text-nx-blue no-underline hover:bg-nx-cyan-light/20">PDF</a>
+                  {nt.paid_person_at && <a href={`/api/admin/notule/${nt.id}/ricevuta`} target="_blank" rel="noopener noreferrer" class="rounded border border-emerald-300 px-2 py-1 text-emerald-700 no-underline hover:bg-emerald-50">Ricevuta</a>}
+                  {nt.status === "draft" && <button type="button" data-note-edit={nt.id} class="rounded border border-nx-gray-light/40 px-2 py-1 font-semibold text-nx-blue hover:bg-nx-cyan-light/20">Modifica</button>}
+                  {nt.status === "draft" && <button type="button" data-note-send={nt.id} class="rounded border border-nx-cyan/40 px-2 py-1 font-semibold text-nx-cyan hover:bg-nx-cyan hover:text-white">Manda in firma</button>}
+                  {nt.status === "sent_for_signature" && <>
+                    <button type="button" data-note-copylink={`${siteBase}/firma-notula/${nt.sign_token}`} class="rounded border border-nx-gray-light/40 px-2 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Copia link</button>
+                    <button type="button" data-note-send={nt.id} class="rounded border border-nx-cyan/40 px-2 py-1 font-semibold text-nx-cyan hover:bg-nx-cyan hover:text-white">Reinvia</button>
+                  </>}
+                  <button type="button" data-note-delete={nt.id} class="rounded border border-red-200 px-2 py-1 font-semibold text-red-600 hover:bg-red-50">Elimina</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- LETTERE D'INCARICO (fase 2) -->
+  <section data-panel="incarichi" class="nx-panel mt-6 hidden space-y-6">
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Nuova lettera d'incarico</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Intestazione NexLudica. Genera il PDF; l'invio in firma elettronica arriva nella prossima fase.</p>
+      <form id="inc-form" class="mt-4 grid gap-3 sm:grid-cols-2">
+        <label class="block text-sm sm:col-span-2">
+          <span class="font-medium text-nx-dark">Collaboratore</span>
+          <select name="user_id" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+            <option value="">— seleziona —</option>
+            {members.map((m) => <option value={m.id}>{m.name}</option>)}
+          </select>
+        </label>
+        <label class="block text-sm sm:col-span-2">
+          <span class="font-medium text-nx-dark">Progetto / ambito</span>
+          <input name="project_label" required maxlength="200" placeholder="es. Wanderer's Quest, MeetLudica" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </label>
+        <label class="block text-sm sm:col-span-2">
+          <span class="font-medium text-nx-dark">Oggetto / attività (sezione 1)</span>
+          <textarea name="object_description" rows="2" maxlength="1000" placeholder="Descrizione dell'attività affidata. Se vuoto, testo generico." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm"></textarea>
+        </label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Dal</span><input name="period_from" type="date" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Al</span><input name="period_to" type="date" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Monte ore (opz.)</span><input name="hours" type="number" step="0.5" min="0" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Compenso orario lordo € (opz.)</span><input name="hourly_rate" type="number" step="0.01" min="0" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Oppure compenso totale lordo € (opz.)</span><input name="compenso_total" type="number" step="0.01" min="0" placeholder="Se compili questo, ignora orario × ore" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">Crea lettera</button>
+          <span id="inc-status" class="text-xs"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="border-b border-nx-gray-light/20 px-6 py-4"><h3 class="text-base font-bold text-nx-dark">Lettere d'incarico ({incarichi.length})</h3></div>
+      {incarichi.length === 0 ? (
+        <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessuna lettera ancora.</p>
+      ) : (
+        <div class="divide-y divide-nx-gray-light/20">
+          {incarichi.map((i) => {
+            const st = incStatusLabel[i.status] ?? incStatusLabel.draft;
+            return (
+              <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-3" data-inc-row data-inc-id={i.id}>
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-nx-dark">{i.person_name} — {i.project_label}</p>
+                  <p class="text-[11px] text-nx-gray-dark">{i.period_from} → {i.period_to}{i.hours ? ` · ${i.hours}h` : ""}{i.hourly_rate ? ` · ${i.hourly_rate}€/h` : ""}</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs">
+                  <span class={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${st.cls}`}>{st.label}</span>
+                  <a href={`/api/admin/incarichi/${i.id}/pdf`} target="_blank" rel="noopener noreferrer" class="rounded border border-nx-gray-light/40 px-2 py-1 text-nx-blue no-underline hover:bg-nx-cyan-light/20">PDF</a>
+                  {i.status === "draft" && (
+                    <button type="button" data-inc-edit={i.id} class="rounded border border-nx-gray-light/40 px-2 py-1 font-semibold text-nx-blue hover:bg-nx-cyan-light/20">Modifica</button>
+                  )}
+                  {i.status === "draft" && (
+                    <button type="button" data-inc-send={i.id} class="rounded border border-nx-cyan/40 px-2 py-1 font-semibold text-nx-cyan hover:bg-nx-cyan hover:text-white">Manda in firma</button>
+                  )}
+                  {i.status === "sent_for_signature" && (
+                    <>
+                      <button type="button" data-inc-copylink={`${siteBase}/firma-incarico/${i.sign_token}`} class="rounded border border-nx-gray-light/40 px-2 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Copia link</button>
+                      <button type="button" data-inc-send={i.id} class="rounded border border-nx-cyan/40 px-2 py-1 font-semibold text-nx-cyan hover:bg-nx-cyan hover:text-white">Reinvia</button>
+                    </>
+                  )}
+                  {i.status === "signed" && i.signed_at && (
+                    <span class="text-[10px] text-nx-gray-dark">firmata il {new Date(i.signed_at).toLocaleDateString("it-IT")}</span>
+                  )}
+                  <button type="button" data-inc-delete={i.id} class="rounded border border-red-200 px-2 py-1 font-semibold text-red-600 hover:bg-red-50">Elimina</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- MARCHE DA BOLLO (fase 1 — attiva) -->
+  <section data-panel="bolli" class="nx-panel mt-6 hidden space-y-6">
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Carica marche da bollo</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Scansiona/fotografa le marche da bollo (PNG o JPG, max 1 MB l'una) e caricale qui: entrano nel pool come "disponibili".
+        Quando una notula richiede la marca, il sistema ne assegna una automaticamente e la appone sul PDF. Il costo è a carico di NexLudica.
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <input type="file" id="bolli-files" accept="image/png,image/jpeg" multiple class="block text-sm text-nx-dark file:mr-3 file:rounded-md file:border-0 file:bg-nx-cyan file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-wider file:text-white" />
+        <button type="button" id="bolli-upload" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">Carica</button>
+        <span id="bolli-status" class="text-xs"></span>
+      </div>
+    </div>
+
+    <section class="grid gap-3 sm:grid-cols-3">
+      <div class="rounded-lg bg-nx-off-white p-4 text-center"><p class="text-[10px] uppercase text-nx-gray-dark">Totale</p><p class="mt-1 text-2xl font-black text-nx-dark">{counts.total}</p></div>
+      <div class="rounded-lg bg-nx-off-white p-4 text-center"><p class="text-[10px] uppercase text-nx-gray-dark">Disponibili</p><p class="mt-1 text-2xl font-black text-emerald-600">{counts.available}</p></div>
+      <div class="rounded-lg bg-nx-off-white p-4 text-center"><p class="text-[10px] uppercase text-nx-gray-dark">Usate</p><p class="mt-1 text-2xl font-black text-nx-gray-dark">{counts.used}</p></div>
+    </section>
+
+    {bolli.length === 0 ? (
+      <p class="rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">Nessuna marca caricata.</p>
+    ) : (
+      <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        {bolli.map((b) => (
+          <div class="rounded-lg border border-nx-gray-light/30 bg-white p-3" data-bollo-row data-bollo-id={b.id}>
+            <img src={`/api/admin/bolli/${b.id}/image`} alt="marca da bollo" loading="lazy" class="h-24 w-full rounded object-contain bg-nx-off-white" />
+            <div class="mt-2 flex items-center justify-between gap-2">
+              {b.used_at ? (
+                <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-800">Usata</span>
+              ) : (
+                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-800">Disponibile</span>
+              )}
+              <span class="text-[10px] text-nx-gray-dark">{fmtDate(b.created_at)}</span>
+            </div>
+            {b.used_at && b.beneficiary_name && (
+              <p class="mt-1 text-[11px] text-nx-gray-dark">Notula {b.note_numero_personale ?? b.note_numero}/{b.note_year} · {b.beneficiary_name}</p>
+            )}
+            <div class="mt-2 flex gap-2">
+              {b.used_at && (
+                <button type="button" data-bollo-release={b.id} class="rounded border border-nx-cyan/40 px-2 py-1 text-[11px] font-semibold text-nx-cyan hover:bg-nx-cyan-light/30">Rilascia</button>
+              )}
+              <button type="button" data-bollo-delete={b.id} class="rounded border border-red-200 px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50">Elimina</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+
+  <!-- CU -->
+  <section data-panel="cu" class="nx-panel mt-6 hidden space-y-4">
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Certificazione Unica (CU) — riepilogo per anno</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Per ciascun percipiente: compensi lordi, ritenute operate e netto delle notule emesse nell'anno (firmate o pagate). Sono i dati da riportare nella CU (causale lavoro autonomo occasionale). Esporta il CSV per la compilazione.
+      </p>
+      <div class="mt-3 flex flex-wrap items-end gap-3">
+        <label class="block text-sm">
+          <span class="block font-medium text-nx-dark">Anno</span>
+          <select id="cu-year" class="mt-1 rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+            {cuYears.length === 0 ? <option value={cuYear}>{cuYear}</option> : cuYears.map((yy) => <option value={yy} selected={yy === cuYear}>{yy}</option>)}
+          </select>
+        </label>
+        <a id="cu-export" href={`/api/admin/notule/cu?year=${cuYear}&format=csv`} class="rounded-lg bg-nx-dark px-5 py-2 text-xs font-bold uppercase tracking-wider text-white no-underline hover:bg-nx-blue-deep">↓ Esporta CSV</a>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+            <tr>
+              <th class="px-4 py-3 text-left">Percipiente</th>
+              <th class="px-4 py-3 text-left">Codice fiscale</th>
+              <th class="px-4 py-3 text-right">Notule</th>
+              <th class="px-4 py-3 text-right">Lordo</th>
+              <th class="px-4 py-3 text-right">Ritenuta</th>
+              <th class="px-4 py-3 text-right">Netto</th>
+            </tr>
+          </thead>
+          <tbody id="cu-tbody" class="divide-y divide-nx-gray-light/20">
+            {cuRows.length === 0 ? (
+              <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-nx-gray-dark">Nessuna notula per quest'anno.</td></tr>
+            ) : cuRows.map((r) => (
+              <tr>
+                <td class="px-4 py-2 font-medium text-nx-dark">{r.name}{!r.fiscal_code && <span class="ml-1 text-[10px] text-amber-700">⚠ CF mancante</span>}</td>
+                <td class="px-4 py-2 font-mono text-xs text-nx-gray-dark">{r.fiscal_code ?? "—"}</td>
+                <td class="px-4 py-2 text-right text-nx-gray-dark">{r.count}{r.paid_count < r.count ? ` (${r.paid_count} pag.)` : ""}</td>
+                <td class="px-4 py-2 text-right font-mono">{formatEur(r.gross)}</td>
+                <td class="px-4 py-2 text-right font-mono text-red-600">{formatEur(r.withholding)}</td>
+                <td class="px-4 py-2 text-right font-mono font-bold text-nx-cyan">{formatEur(r.net)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="text-[11px] text-nx-gray-dark">La CU certifica i compensi <strong>effettivamente erogati</strong> nell'anno: verifica che le notule incluse risultino pagate. "(N pag.)" indica quante delle notule conteggiate risultano già pagate.</p>
+  </section>
+
+  <!-- MODAL MODIFICA NOTULA -->
+  <div id="note-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-xl rounded-xl bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-nx-gray-light/20 px-5 py-3">
+        <h3 class="text-base font-bold text-nx-dark">Modifica notula <span id="ne-person" class="font-normal text-nx-gray-dark"></span></h3>
+        <button type="button" id="ne-close" class="text-nx-gray-dark hover:text-nx-dark">✕</button>
+      </div>
+      <form id="note-edit-form" class="grid gap-3 px-5 py-4 sm:grid-cols-2">
+        <input type="hidden" id="ne-id" />
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Data</span><input id="ne-date" type="date" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Progetto / CIG</span><input id="ne-project" maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Prestazione</span><input id="ne-desc" required maxlength="500" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Compenso lordo €</span><input id="ne-gross" type="number" step="0.01" min="0" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Ritenuta %</span><input id="ne-wh" type="number" step="0.01" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Imponibile %</span><input id="ne-tx" type="number" step="0.01" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Ore (opz.)</span><input id="ne-hours" type="number" step="0.5" min="0" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Periodo dal (opz.)</span><input id="ne-pstart" type="date" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Periodo al (opz.)</span><input id="ne-pend" type="date" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Note (opz.)</span><input id="ne-notes" maxlength="500" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <div class="sm:col-span-2 flex items-center justify-end gap-3">
+          <span id="ne-status" class="mr-auto text-xs"></span>
+          <button type="button" id="ne-cancel" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:bg-nx-off-white">Annulla</button>
+          <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL MODIFICA INCARICO -->
+  <div id="inc-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-xl rounded-xl bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-nx-gray-light/20 px-5 py-3">
+        <h3 class="text-base font-bold text-nx-dark">Modifica lettera d'incarico <span id="ie-person" class="font-normal text-nx-gray-dark"></span></h3>
+        <button type="button" id="ie-close" class="text-nx-gray-dark hover:text-nx-dark">✕</button>
+      </div>
+      <form id="inc-edit-form" class="grid gap-3 px-5 py-4 sm:grid-cols-2">
+        <input type="hidden" id="ie-id" />
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Progetto / ambito</span><input id="ie-project" required maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Oggetto / attività</span><textarea id="ie-obj" rows="2" maxlength="1000" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm"></textarea></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Dal</span><input id="ie-from" type="date" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Al</span><input id="ie-to" type="date" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Monte ore (opz.)</span><input id="ie-hours" type="number" step="0.5" min="0" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm"><span class="font-medium text-nx-dark">Compenso orario € (opz.)</span><input id="ie-rate" type="number" step="0.01" min="0" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-sm sm:col-span-2"><span class="font-medium text-nx-dark">Compenso totale lordo € (opz.)</span><input id="ie-total" type="number" step="0.01" min="0" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <div class="sm:col-span-2 flex items-center justify-end gap-3">
+          <span id="ie-status" class="mr-auto text-xs"></span>
+          <button type="button" id="ie-cancel" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:bg-nx-off-white">Annulla</button>
+          <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ notuleEdit, incarichiEdit }}>
+  window.__notuleEdit = notuleEdit; window.__incarichiEdit = incarichiEdit;
+</script>
+
+<script is:inline>
+  (function () {
+    const tabs = document.querySelectorAll(".nx-tab");
+    const panels = document.querySelectorAll(".nx-panel");
+    tabs.forEach((t) => t.addEventListener("click", () => {
+      tabs.forEach((x) => { x.classList.remove("nx-tab-active", "border-nx-cyan", "text-nx-cyan"); x.classList.add("border-transparent", "text-nx-gray-dark"); });
+      t.classList.remove("border-transparent", "text-nx-gray-dark");
+      t.classList.add("nx-tab-active", "border-nx-cyan", "text-nx-cyan");
+      const key = t.getAttribute("data-tab");
+      panels.forEach((p) => p.classList.toggle("hidden", p.getAttribute("data-panel") !== key));
+    }));
+
+    const upBtn = document.getElementById("bolli-upload");
+    const upFiles = document.getElementById("bolli-files");
+    const upStatus = document.getElementById("bolli-status");
+    upBtn?.addEventListener("click", async () => {
+      const files = upFiles && upFiles.files;
+      if (!files || files.length === 0) { upStatus.textContent = "Seleziona almeno un file"; upStatus.className = "text-xs text-red-600"; return; }
+      upBtn.disabled = true; upStatus.textContent = "Caricamento…"; upStatus.className = "text-xs text-nx-gray-dark";
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      try {
+        const res = await fetch("/api/admin/bolli/upload", { method: "POST", body: fd });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { upStatus.textContent = "✗ " + (d.error || res.status); upStatus.className = "text-xs text-red-600"; upBtn.disabled = false; return; }
+        upStatus.textContent = `✓ ${d.inserted} caricate${d.skipped ? `, ${d.skipped} scartate` : ""}`;
+        upStatus.className = "text-xs font-semibold text-emerald-600";
+        setTimeout(() => location.reload(), 900);
+      } catch (e) { upStatus.textContent = "Errore di rete"; upStatus.className = "text-xs text-red-600"; upBtn.disabled = false; }
+    });
+
+    document.querySelectorAll("[data-bollo-delete]").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!confirm("Eliminare questa marca dal pool?")) return;
+      const id = btn.getAttribute("data-bollo-delete");
+      const res = await fetch("/api/admin/bolli/" + encodeURIComponent(id), { method: "DELETE" });
+      if (res.ok) { const row = document.querySelector(`[data-bollo-row][data-bollo-id="${id}"]`); if (row) row.remove(); }
+    }));
+    document.querySelectorAll("[data-bollo-release]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-bollo-release");
+      const res = await fetch("/api/admin/bolli/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "release" }) });
+      if (res.ok) location.reload();
+    }));
+
+    // Incarichi: crea
+    const incForm = document.getElementById("inc-form");
+    const incStatus = document.getElementById("inc-status");
+    incForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(incForm);
+      const body = Object.fromEntries(fd.entries());
+      if (!body.user_id || !body.project_label || !body.period_from || !body.period_to) {
+        incStatus.textContent = "Compila collaboratore, progetto e periodo"; incStatus.className = "text-xs text-red-600"; return;
+      }
+      incStatus.textContent = "Creazione…"; incStatus.className = "text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/incarichi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { incStatus.textContent = "✗ " + (d.error || res.status); incStatus.className = "text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { incStatus.textContent = "Errore di rete"; incStatus.className = "text-xs text-red-600"; }
+    });
+    document.querySelectorAll("[data-inc-delete]").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!confirm("Eliminare questa lettera d'incarico?")) return;
+      const id = btn.getAttribute("data-inc-delete");
+      const res = await fetch("/api/admin/incarichi/" + encodeURIComponent(id), { method: "DELETE" });
+      if (res.ok) { const row = document.querySelector(`[data-inc-row][data-inc-id="${id}"]`); if (row) row.remove(); }
+    }));
+    document.querySelectorAll("[data-inc-send]").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!confirm("Inviare la lettera d'incarico in firma al collaboratore via email?")) return;
+      const id = btn.getAttribute("data-inc-send");
+      btn.disabled = true; btn.textContent = "…";
+      try {
+        const res = await fetch("/api/admin/incarichi/" + encodeURIComponent(id) + "/send", { method: "POST" });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { alert("Errore: " + (d.error || res.status)); btn.disabled = false; btn.textContent = "Manda in firma"; return; }
+        location.reload();
+      } catch (e) { alert("Errore di rete"); btn.disabled = false; btn.textContent = "Manda in firma"; }
+    }));
+    document.querySelectorAll("[data-inc-copylink]").forEach((btn) => btn.addEventListener("click", async () => {
+      const link = btn.getAttribute("data-inc-copylink");
+      try { await navigator.clipboard.writeText(link); const o = btn.textContent; btn.textContent = "✓ Copiato"; setTimeout(() => btn.textContent = o, 1500); }
+      catch (e) { prompt("Copia il link:", link); }
+    }));
+
+    // Notule: anteprima live
+    const fmtEur = (n) => n.toLocaleString("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" });
+    const nfGross = document.getElementById("nf-gross"), nfWh = document.getElementById("nf-wh"), nfTx = document.getElementById("nf-tx");
+    function notePreview() {
+      const g = parseFloat(nfGross?.value || "0") || 0;
+      const wh = parseFloat(nfWh?.value || "20") || 0;
+      const tx = parseFloat(nfTx?.value || "100") || 0;
+      const rit = Math.round(g * (tx / 100) * (wh / 100) * 100) / 100;
+      const bollo = g > 77.47 ? 2 : 0;
+      const net = Math.round((g - rit) * 100) / 100;
+      const pw = document.getElementById("nf-prev-wh"), pb = document.getElementById("nf-prev-bollo"), pn = document.getElementById("nf-prev-net");
+      if (pw) pw.textContent = "− " + fmtEur(rit);
+      if (pb) pb.textContent = bollo ? fmtEur(bollo) : "non dovuta";
+      if (pn) pn.textContent = fmtEur(net);
+    }
+    [nfGross, nfWh, nfTx].forEach((el) => el && el.addEventListener("input", notePreview));
+    notePreview();
+
+    const noteForm = document.getElementById("note-form");
+    const noteStatus = document.getElementById("note-status");
+    noteForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(noteForm);
+      const body = Object.fromEntries(fd.entries());
+      if (!body.user_id || !body.date || !body.service_description || !body.amount_gross) {
+        noteStatus.textContent = "Compila percipiente, data, prestazione e importo"; noteStatus.className = "text-xs text-red-600"; return;
+      }
+      noteStatus.textContent = "Creazione…"; noteStatus.className = "text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/notule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { noteStatus.textContent = "✗ " + (d.error || res.status); noteStatus.className = "text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { noteStatus.textContent = "Errore di rete"; noteStatus.className = "text-xs text-red-600"; }
+    });
+    document.querySelectorAll("[data-note-delete]").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!confirm("Eliminare questa notula? L'eventuale marca da bollo assegnata torna disponibile.")) return;
+      const id = btn.getAttribute("data-note-delete");
+      const res = await fetch("/api/admin/notule/" + encodeURIComponent(id), { method: "DELETE" });
+      if (res.ok) { const r = document.querySelector(`[data-note-row][data-note-id="${id}"]`); if (r) r.remove(); }
+    }));
+    document.querySelectorAll("[data-note-send]").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!confirm("Inviare la notula in firma al percipiente? Se richiede la marca da bollo, ne verrà assegnata una dal pool.")) return;
+      const id = btn.getAttribute("data-note-send");
+      btn.disabled = true; btn.textContent = "…";
+      try {
+        const res = await fetch("/api/admin/notule/" + encodeURIComponent(id) + "/send", { method: "POST" });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { alert("Errore: " + (d.error || res.status)); btn.disabled = false; btn.textContent = "Manda in firma"; return; }
+        location.reload();
+      } catch (e) { alert("Errore di rete"); btn.disabled = false; btn.textContent = "Manda in firma"; }
+    }));
+    document.querySelectorAll("[data-note-copylink]").forEach((btn) => btn.addEventListener("click", async () => {
+      const link = btn.getAttribute("data-note-copylink");
+      try { await navigator.clipboard.writeText(link); const o = btn.textContent; btn.textContent = "✓ Copiato"; setTimeout(() => btn.textContent = o, 1500); }
+      catch (e) { prompt("Copia il link:", link); }
+    }));
+
+    // Riconciliazione automatica col bilancio
+    const recBtn = document.getElementById("reconcile-btn");
+    const recStatus = document.getElementById("reconcile-status");
+    recBtn?.addEventListener("click", async () => {
+      recBtn.disabled = true; recStatus.textContent = "Incrocio col bilancio…"; recStatus.className = "text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/notule/reconcile", { method: "POST" });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { recStatus.textContent = "✗ " + (d.error || res.status); recStatus.className = "text-xs text-red-600"; recBtn.disabled = false; return; }
+        recStatus.textContent = `✓ Persona: ${d.matchedPerson}, F24: ${d.matchedF24}, pagate: ${d.nowPaid}`;
+        recStatus.className = "text-xs font-semibold text-emerald-600";
+        setTimeout(() => location.reload(), 1600);
+      } catch (e) { recStatus.textContent = "Errore di rete"; recStatus.className = "text-xs text-red-600"; recBtn.disabled = false; }
+    });
+
+    // CU: cambio anno → ricarica riepilogo + link export
+    const cuYearSel = document.getElementById("cu-year");
+    const cuTbody = document.getElementById("cu-tbody");
+    const cuExport = document.getElementById("cu-export");
+    cuYearSel?.addEventListener("change", async () => {
+      const y = cuYearSel.value;
+      if (cuExport) cuExport.href = `/api/admin/notule/cu?year=${y}&format=csv`;
+      cuTbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-xs text-nx-gray-dark">Caricamento…</td></tr>';
+      try {
+        const res = await fetch(`/api/admin/notule/cu?year=${y}`);
+        const d = await res.json();
+        if (!d.ok || !d.rows.length) { cuTbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-sm text-nx-gray-dark">Nessuna notula per quest\'anno.</td></tr>'; return; }
+        cuTbody.innerHTML = d.rows.map((r) => `
+          <tr>
+            <td class="px-4 py-2 font-medium text-nx-dark">${esc(r.name)}${!r.fiscal_code ? ' <span class="ml-1 text-[10px] text-amber-700">⚠ CF mancante</span>' : ""}</td>
+            <td class="px-4 py-2 font-mono text-xs text-nx-gray-dark">${r.fiscal_code ? esc(r.fiscal_code) : "—"}</td>
+            <td class="px-4 py-2 text-right text-nx-gray-dark">${r.count}${r.paid_count < r.count ? ` (${r.paid_count} pag.)` : ""}</td>
+            <td class="px-4 py-2 text-right font-mono">${fmtEur(r.gross)}</td>
+            <td class="px-4 py-2 text-right font-mono text-red-600">${fmtEur(r.withholding)}</td>
+            <td class="px-4 py-2 text-right font-mono font-bold text-nx-cyan">${fmtEur(r.net)}</td>
+          </tr>`).join("");
+      } catch (e) { cuTbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-xs text-red-600">Errore di rete</td></tr>'; }
+    });
+    function esc(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+    // === Modifica notula (bozza) ===
+    const NE = window.__notuleEdit || {};
+    const neModal = document.getElementById("note-edit-modal");
+    const g = (id) => document.getElementById(id);
+    function openNE(id) {
+      const d = NE[id]; if (!d) return;
+      g("ne-id").value = id;
+      g("ne-person").textContent = "— " + (d.person_name || "");
+      g("ne-date").value = d.date || ""; g("ne-project").value = d.project_code || "";
+      g("ne-desc").value = d.service_description || ""; g("ne-gross").value = d.amount_gross ?? "";
+      g("ne-wh").value = d.withholding_percentage ?? 20; g("ne-tx").value = d.taxable_percentage ?? 100;
+      g("ne-hours").value = d.hours ?? ""; g("ne-pstart").value = d.service_period_start || "";
+      g("ne-pend").value = d.service_period_end || ""; g("ne-notes").value = d.notes || "";
+      g("ne-status").textContent = "";
+      neModal.classList.remove("hidden"); neModal.classList.add("flex");
+    }
+    function closeNE() { neModal.classList.add("hidden"); neModal.classList.remove("flex"); }
+    g("ne-close")?.addEventListener("click", closeNE);
+    g("ne-cancel")?.addEventListener("click", closeNE);
+    neModal?.addEventListener("click", (e) => { if (e.target === neModal) closeNE(); });
+    document.querySelectorAll("[data-note-edit]").forEach((b) => b.addEventListener("click", () => openNE(b.getAttribute("data-note-edit"))));
+    g("note-edit-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = g("ne-id").value;
+      const st = g("ne-status");
+      const body = {
+        date: g("ne-date").value, service_description: g("ne-desc").value, project_code: g("ne-project").value,
+        amount_gross: g("ne-gross").value, withholding_percentage: g("ne-wh").value, taxable_percentage: g("ne-tx").value,
+        hours: g("ne-hours").value, service_period_start: g("ne-pstart").value, service_period_end: g("ne-pend").value, notes: g("ne-notes").value,
+      };
+      if (!body.date || !body.service_description || !body.amount_gross) { st.textContent = "Campi obbligatori mancanti"; st.className = "mr-auto text-xs text-red-600"; return; }
+      st.textContent = "Salvataggio…"; st.className = "mr-auto text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/notule/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { st.textContent = "✗ " + (d.error || res.status); st.className = "mr-auto text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { st.textContent = "Errore di rete"; st.className = "mr-auto text-xs text-red-600"; }
+    });
+
+    // === Modifica incarico (bozza) ===
+    const IE = window.__incarichiEdit || {};
+    const ieModal = document.getElementById("inc-edit-modal");
+    function openIE(id) {
+      const d = IE[id]; if (!d) return;
+      g("ie-id").value = id; g("ie-person").textContent = "— " + (d.person_name || "");
+      g("ie-project").value = d.project_label || ""; g("ie-obj").value = d.object_description || "";
+      g("ie-from").value = d.period_from || ""; g("ie-to").value = d.period_to || "";
+      g("ie-hours").value = d.hours ?? ""; g("ie-rate").value = d.hourly_rate ?? ""; g("ie-total").value = d.compenso_total ?? "";
+      g("ie-status").textContent = "";
+      ieModal.classList.remove("hidden"); ieModal.classList.add("flex");
+    }
+    function closeIE() { ieModal.classList.add("hidden"); ieModal.classList.remove("flex"); }
+    g("ie-close")?.addEventListener("click", closeIE);
+    g("ie-cancel")?.addEventListener("click", closeIE);
+    ieModal?.addEventListener("click", (e) => { if (e.target === ieModal) closeIE(); });
+    document.querySelectorAll("[data-inc-edit]").forEach((b) => b.addEventListener("click", () => openIE(b.getAttribute("data-inc-edit"))));
+    g("inc-edit-form")?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = g("ie-id").value;
+      const st = g("ie-status");
+      const body = {
+        project_label: g("ie-project").value, object_description: g("ie-obj").value,
+        period_from: g("ie-from").value, period_to: g("ie-to").value,
+        hours: g("ie-hours").value, hourly_rate: g("ie-rate").value, compenso_total: g("ie-total").value,
+      };
+      if (!body.project_label || !body.period_from || !body.period_to) { st.textContent = "Progetto e periodo obbligatori"; st.className = "mr-auto text-xs text-red-600"; return; }
+      st.textContent = "Salvataggio…"; st.className = "mr-auto text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/incarichi/" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { st.textContent = "✗ " + (d.error || res.status); st.className = "mr-auto text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { st.textContent = "Errore di rete"; st.className = "mr-auto text-xs text-red-600"; }
+    });
+
+    // Toggle manuale gamba pagamento (fallback, es. F24 aggregato)
+    document.querySelectorAll("[data-pay-toggle]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-id");
+      const leg = btn.getAttribute("data-leg");
+      const paid = btn.getAttribute("data-paid") === "1";
+      const verb = paid ? "Annullare" : "Confermare";
+      const what = leg === "f24" ? "il versamento F24" : "il pagamento alla persona";
+      if (!confirm(`${verb} ${what} per questa notula?`)) return;
+      const res = await fetch("/api/admin/notule/" + encodeURIComponent(id) + "/payment", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leg, paid: !paid }),
+      });
+      if (res.ok) location.reload();
+    }));
+  })();
+</script>

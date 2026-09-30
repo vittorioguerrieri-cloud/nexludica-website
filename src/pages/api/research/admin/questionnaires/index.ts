@@ -25,12 +25,17 @@ export const POST: APIRoute = async (ctx) => {
   } catch {
     return json({ error: "schemaJson non e' JSON valido" }, 400);
   }
+  const Q_STATUS_VALUES = ["draft", "active", "closed"] as const;
+  const rawStatus = body.status as string | undefined;
+  if (rawStatus !== undefined && !Q_STATUS_VALUES.includes(rawStatus as any)) {
+    return json({ error: `status deve essere uno di: ${Q_STATUS_VALUES.join(", ")}` }, 400);
+  }
   try {
     const questionnaire = await createQuestionnaire(db, {
       studyId, slug, title, schemaJson,
       description: body.description ? String(body.description) : undefined,
       position: typeof body.position === "number" ? body.position : 0,
-      status: (body.status as any) ?? "draft",
+      status: (rawStatus as typeof Q_STATUS_VALUES[number] | undefined) ?? "draft",
     });
     return json({ ok: true, questionnaire });
   } catch (e: any) {

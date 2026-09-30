@@ -229,54 +229,126 @@ export async function ensureFolder(
 }
 
 /**
- * Carica un file in parentId.
- * Usa multipart upload (un'unica chiamata).
+ * Carica un file su Drive in parentId.
+ *
+ * Strategia adattiva:
+ *  - File ≤ 5 MB → multipart upload (singola call)
+ *  - File > 5 MB → resumable upload (avvia sessione + upload chunked):
+ *    più robusto, meno memoria, non timeout di richiesta singola.
+ *
+ * Ritorna {ok:false,error:string} con il messaggio di errore vero di Drive
+ * (utile per il debug; lato API rilanciamo all'admin).
+ */
+export type UploadResult =
+  | { ok: true; file: DriveFile }
+  | { ok: false; error: string };
+
+export async function uploadFileWithDetails(
+  env: Env,
+  parentId: string,
+  file: { name: string; type: string; arrayBuffer: () => Promise<ArrayBuffer> },
+): Promise<UploadResult> {
+  const token = await getAccessToken(env);
+  if (!token) return { ok: false, error: "Drive auth fallita (service account)" };
+
+  const buf = await file.arrayBuffer();
+  const total = buf.byteLength;
+  const MULTIPART_THRESHOLD = 5 * 1024 * 1024;
+  const fields = "id,name,mimeType,webViewLink,webContentLink,size,modifiedTime";
+  const metadata = { name: file.name, parents: [parentId] };
+  const mime = file.type || "application/octet-stream";
+
+  // === Multipart per file piccoli ===
+  if (total <= MULTIPART_THRESHOLD) {
+    const boundary = "nexludica-" + crypto.randomUUID();
+    const enc = new TextEncoder();
+    const head =
+      `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify(metadata) +
+      `\r\n--${boundary}\r\n` +
+      `Content-Type: ${mime}\r\n\r\n`;
+    const tail = `\r\n--${boundary}--`;
+    const headBytes = enc.encode(head);
+    const tailBytes = enc.encode(tail);
+    const body = new Uint8Array(headBytes.length + total + tailBytes.length);
+    body.set(headBytes, 0);
+    body.set(new Uint8Array(buf), headBytes.length);
+    body.set(tailBytes, headBytes.length + total);
+
+    const res = await fetch(
+      `${DRIVE_UPLOAD_API}/files?uploadType=multipart&supportsAllDrives=true&fields=${fields}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      },
+    );
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error("[drive] multipart upload failed:", res.status, txt);
+      return { ok: false, error: `Drive ${res.status}: ${txt.slice(0, 300)}` };
+    }
+    return { ok: true, file: (await res.json()) as DriveFile };
+  }
+
+  // === Resumable upload per file grandi ===
+  // 1) Avvia sessione: POST con metadata JSON, riceve Location header
+  const initRes = await fetch(
+    `${DRIVE_UPLOAD_API}/files?uploadType=resumable&supportsAllDrives=true&fields=${fields}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": mime,
+        "X-Upload-Content-Length": String(total),
+      },
+      body: JSON.stringify(metadata),
+    },
+  );
+  if (!initRes.ok) {
+    const txt = await initRes.text();
+    console.error("[drive] resumable init failed:", initRes.status, txt);
+    return { ok: false, error: `Drive resumable init ${initRes.status}: ${txt.slice(0, 300)}` };
+  }
+  const sessionUrl = initRes.headers.get("Location") || initRes.headers.get("location");
+  if (!sessionUrl) {
+    return { ok: false, error: "Drive resumable: missing session URL" };
+  }
+
+  // 2) Carica i bytes in un'unica PUT (Workers gestisce fino a ~100MB di body)
+  //    Per file molto grandi si potrebbe chunkare, ma 100MB rientra nel limite.
+  const putRes = await fetch(sessionUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": mime,
+      "Content-Length": String(total),
+    },
+    body: buf,
+  });
+  if (!putRes.ok) {
+    const txt = await putRes.text();
+    console.error("[drive] resumable PUT failed:", putRes.status, txt);
+    return { ok: false, error: `Drive resumable PUT ${putRes.status}: ${txt.slice(0, 300)}` };
+  }
+  return { ok: true, file: (await putRes.json()) as DriveFile };
+}
+
+/**
+ * Wrapper backward-compatible: ritorna DriveFile | null (per uso legacy).
+ * Per uploads NUOVI usa uploadFileWithDetails per avere l'errore puntuale.
  */
 export async function uploadFile(
   env: Env,
   parentId: string,
   file: { name: string; type: string; arrayBuffer: () => Promise<ArrayBuffer> },
 ): Promise<DriveFile | null> {
-  const token = await getAccessToken(env);
-  if (!token) return null;
-
-  const buf = await file.arrayBuffer();
-  const metadata = {
-    name: file.name,
-    parents: [parentId],
-  };
-  const boundary = "nexludica-" + crypto.randomUUID();
-  const enc = new TextEncoder();
-  const head =
-    `--${boundary}\r\n` +
-    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
-    JSON.stringify(metadata) +
-    `\r\n--${boundary}\r\n` +
-    `Content-Type: ${file.type || "application/octet-stream"}\r\n\r\n`;
-  const tail = `\r\n--${boundary}--`;
-  const headBytes = enc.encode(head);
-  const tailBytes = enc.encode(tail);
-  const body = new Uint8Array(headBytes.length + buf.byteLength + tailBytes.length);
-  body.set(headBytes, 0);
-  body.set(new Uint8Array(buf), headBytes.length);
-  body.set(tailBytes, headBytes.length + buf.byteLength);
-
-  const res = await fetch(
-    `${DRIVE_UPLOAD_API}/files?uploadType=multipart&supportsAllDrives=true&fields=id,name,mimeType,webViewLink,webContentLink,size,modifiedTime`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    },
-  );
-  if (!res.ok) {
-    console.error("[drive] upload failed:", await res.text());
-    return null;
-  }
-  return await res.json<DriveFile>();
+  const r = await uploadFileWithDetails(env, parentId, file);
+  return r.ok ? r.file : null;
 }
 
 /**
@@ -386,6 +458,22 @@ export async function revokeAccess(
 /**
  * Elimina un file/cartella.
  */
+/**
+ * Scarica il contenuto binario di un file da Drive (alt=media).
+ * Ritorna null se il token manca o la richiesta fallisce.
+ */
+export async function downloadFile(env: Env, fileId: string): Promise<Uint8Array | null> {
+  const token = await getAccessToken(env);
+  if (!token) return null;
+  const res = await fetch(
+    `${DRIVE_API}/files/${fileId}?alt=media&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  return new Uint8Array(buf);
+}
+
 export async function deleteFile(env: Env, fileId: string): Promise<boolean> {
   const token = await getAccessToken(env);
   if (!token) return false;

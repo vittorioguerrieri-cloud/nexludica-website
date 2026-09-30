@@ -1,0 +1,710 @@
+---
+/**
+ * Pagina sessione: cronometro live + checklist osservativa.
+ *
+ * I due tool essenziali sono nelle tab in alto. La pagina lavora SPA-style
+ * con fetch verso /api/playtest/sessions/:id/* per aggiungere turni,
+ * fasi speciali, checklist responses, ecc.
+ */
+import PlaytestLayout from "../../../layouts/PlaytestLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import {
+  getSession,
+  getGameById,
+  listPlayers,
+  listTurns,
+  listPhaseTimes,
+  listChecklistInstances,
+  listChecklistItems,
+  listChecklistResponses,
+  listObservations,
+  listOmniComments,
+  listReportSuggestions,
+  listSessionCollaborators,
+  type ChecklistItem,
+} from "../../../server/playtest";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) {
+  const nextUrl = encodeURIComponent(new URL(Astro.request.url).toString());
+  return Astro.redirect(`https://nexludica.org/login?next=${nextUrl}`);
+}
+
+const { id } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+
+if (!db || !id) return new Response("Not found", { status: 404 });
+const session = await getSession(db, String(id));
+if (!session) return new Response("Sessione non trovata", { status: 404 });
+const game = await getGameById(db, session.gameId);
+if (!game) return new Response("Gioco non trovato", { status: 404 });
+
+const players = await listPlayers(db, session.id);
+const turns = await listTurns(db, session.id);
+const phaseTimes = await listPhaseTimes(db, session.id);
+const instances = await listChecklistInstances(db, session.id);
+const obsItems: ChecklistItem[] = await listChecklistItems(db, "observation", game.id);
+const setupItems: ChecklistItem[] = await listChecklistItems(db, "setup", game.id);
+const observations = await listObservations(db, session.id);
+const omniComments = await listOmniComments(db, session.id);
+const reportSuggestions = await listReportSuggestions(db);
+const collaborators = await listSessionCollaborators(db, session.id);
+
+// Squadre effettive: override sessione (se presente) > cfg.teams del gioco
+const effectiveTeams = session.teamsOverride && session.teamsOverride.length > 0
+  ? session.teamsOverride
+  : (game.procedureConfig.teams ?? [{ name: "Squadra A" }, { name: "Squadra B" }]);
+
+// Effective cfg (merging): è quello del gioco, ma con teams sovrascritti se applicabile.
+const effectiveCfg = { ...game.procedureConfig, teams: effectiveTeams };
+
+// Per ogni instance precarico le response per pre-popolare il form senza
+// fetch aggiuntivo al primo render.
+const responsesByInstance: Record<string, Record<string, { score: number | null; comment: string | null }>> = {};
+for (const inst of instances) {
+  const rs = await listChecklistResponses(db, inst.id);
+  responsesByInstance[inst.id] = {};
+  for (const r of rs) {
+    responsesByInstance[inst.id][r.itemId] = { score: r.score, comment: r.comment };
+  }
+}
+
+const cfg = effectiveCfg;
+const enabledPhases = cfg.phases ?? [];
+const enabledModules = cfg.modules ?? [];
+const useTimer = enabledModules.includes("timer");
+const useChecklist = enabledModules.includes("checklist");
+
+// Round corrente: max round + 1 (o 1 se nessun turno)
+const currentRound = turns.length > 0 ? Math.max(...turns.map((t) => t.round)) : 1;
+
+const phaseLabels: Record<string, string> = {
+  setup: "Set-up",
+  inizio: "Inizio",
+  fine: "Fine",
+  partecipata: "Partecipata",
+};
+
+// Serialize lightweight payload per il JS frontend
+const bootstrap = {
+  sessionId: session.id,
+  gameSlug: game.slug,
+  cfg,
+  players,
+  turns,
+  phaseTimes,
+  instances,
+  obsItems,
+  setupItems,
+  responsesByInstance,
+  currentRound,
+  observations,
+  omniComments,
+  reportSuggestions,
+  reportData: session.reportData ?? { criticita: [], cose_poco_chiare: [], narrative_summary: "" },
+  teamsOverride: session.teamsOverride,
+  collaborators,
+  currentUserId: user.id,
+};
+---
+
+<PlaytestLayout
+  title={`${session.label} — ${game.name}`}
+  fluid
+  crumbs={[
+    { label: game.name, href: `/giochi/${game.slug}` },
+    { label: session.label },
+  ]}
+>
+  <section class="rounded-xl bg-white p-5 shadow-sm">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Sessione</p>
+        <h1 class="mt-1 text-2xl font-black tracking-tight text-nx-dark sm:text-3xl" style="font-family: var(--font-display);">
+          {session.label}
+        </h1>
+        <p class="mt-1 text-sm text-nx-gray-dark">
+          {game.name}{session.playedAt && ` · ${session.playedAt}`}{session.location && ` · ${session.location}`}
+        </p>
+        {collaborators.length > 0 && (
+          <p class="mt-2 flex flex-wrap items-center gap-1 text-xs text-nx-gray-dark">
+            <span class="font-semibold">{collaborators.length > 1 ? "Collaboratori:" : "Osservatore:"}</span>
+            {collaborators.map((c) => (
+              <span class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${c.id === user.id ? "bg-nx-cyan-light text-nx-cyan font-bold" : "bg-nx-off-white text-nx-dark"}`}
+                title={`Turni: ${c.contributions.turns} · Checklist: ${c.contributions.checklists} · Osservazioni: ${c.contributions.observations} · OMNI: ${c.contributions.omni}`}>
+                {c.name}{c.id === user.id && " (tu)"}
+              </span>
+            ))}
+          </p>
+        )}
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-700">{session.status}</span>
+        <button id="session-edit" class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan">
+          ✎ Modifica
+        </button>
+        {cfg.is_team_game && (
+          <button id="rename-teams-btn" class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan">
+            ✎ Rinomina squadre
+          </button>
+        )}
+        <a href={`/stampa/omni?game=${game.slug}&n=${Math.max(2, players.length || 4)}`} target="_blank" rel="noopener"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan">
+          Stampa OMNI
+        </a>
+        <a href={`/sessioni/${session.id}/report`} target="_blank" rel="noopener"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan">
+          Report ↗
+        </a>
+        <button id="session-complete" class="rounded-md border border-emerald-500 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-emerald-700 transition hover:bg-emerald-50">
+          Concludi
+        </button>
+      </div>
+    </div>
+
+    {/* Tab nav */}
+    <div class="mt-5 flex flex-wrap gap-1 border-b border-nx-gray-light/30">
+      {useTimer && (<button data-tab="timer" class="nx-tab nx-tab-active">⏱ Cronometro</button>)}
+      <button data-tab="observations" class="nx-tab">👁 Sempre sottocchio</button>
+      {useChecklist && (<button data-tab="checklist" class="nx-tab">✓ Checklist</button>)}
+      <button data-tab="debriefing" class="nx-tab">💬 Debriefing</button>
+      <button data-tab="players" class="nx-tab">👥 Giocatori</button>
+    </div>
+  </section>
+
+  {/* === TAB: Cronometro === */}
+  {useTimer && (
+  <section data-panel="timer" class="mt-6">
+    <div class="grid gap-6 lg:grid-cols-[1fr_340px]">
+      {/* MAIN COLUMN: timer + points + history */}
+      <div class="space-y-6">
+        <div class="nx-timer-sticky rounded-xl bg-white p-6 shadow-sm">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Cronometro turno</h2>
+
+          <div class="mt-4 rounded-lg bg-nx-dark p-6 text-center">
+            <div id="timer-display" class="font-mono text-5xl font-black text-nx-cyan sm:text-7xl">00:00</div>
+            <div class="mt-2 text-xs uppercase tracking-widest text-white/60">
+              Round <span id="round-display">{currentRound}</span>
+              · Giocatore <span id="player-display" class="text-nx-cyan">—</span>
+            </div>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <button id="t-next" class="rounded-md bg-nx-cyan px-5 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5">
+              <span id="t-next-label">▶ Avvia</span>
+            </button>
+            <button id="t-pause" class="hidden rounded-md bg-amber-500 px-4 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5">⏸ Pausa</button>
+            <button id="t-stop" disabled class="rounded-md bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 disabled:opacity-50">⏹ Stop & salva</button>
+            <button id="t-skip" class="rounded-md border border-nx-gray-light/40 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">Salta</button>
+            <button id="t-reset" class="rounded-md border border-nx-gray-light/40 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">Reset</button>
+          </div>
+
+          <p class="mt-3 text-center text-[11px] text-nx-gray-dark">
+            <kbd class="rounded bg-nx-off-white px-1.5 py-0.5 font-mono text-[10px]">SPAZIO</kbd> = salva turno corrente e passa al giocatore successivo
+          </p>
+
+          <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_120px]">
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Evento del turno (opzionale)</label>
+              <input id="t-event" type="text" maxlength="80" placeholder="es. Primo sangue, Morte, Uovo..."
+                class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Round</label>
+              <input id="t-round" type="number" min="1" max="99" value={currentRound}
+                class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+            </div>
+          </div>
+        </div>
+
+        {/* POINTS TRACKERS — popolati via JS in base a is_team_game */}
+        <div id="points-container" class="grid gap-4 sm:grid-cols-2"></div>
+
+        {/* HISTORY */}
+        <div class="rounded-xl bg-white p-5 shadow-sm">
+          <div class="flex items-baseline justify-between">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Storico turni</h2>
+            <div class="flex gap-3 text-xs text-nx-gray-dark">
+              <span><span id="stat-count" class="font-bold text-nx-cyan">{turns.length}</span> turni</span>
+              <span><span id="stat-total" class="font-bold text-nx-cyan">—</span> min</span>
+              <span>media <span id="stat-avg" class="font-bold text-nx-cyan">—</span></span>
+            </div>
+          </div>
+          <p class="mt-1 text-[11px] text-nx-gray-dark">Clicca su un turno per modificarlo (es. correggere durata o punti).</p>
+
+          <div id="turns-list" class="mt-3 space-y-1 text-xs"></div>
+        </div>
+      </div>
+
+      {/* SIDEBAR: turn order + special phases */}
+      <aside class="space-y-6">
+        <div class="rounded-xl bg-white p-5 shadow-sm">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Ordine di turno</h3>
+          <p class="mt-1 text-[11px] text-nx-gray-dark">Trascina per riordinare. <kbd class="rounded bg-nx-off-white px-1 font-mono text-[10px]">SPAZIO</kbd> = prossimo. Quando completa il giro, il round avanza.</p>
+          <ul id="turn-order" class="mt-3 space-y-1.5"></ul>
+          <p id="turn-order-empty" class="mt-3 hidden rounded-md border-2 border-dashed border-nx-gray-light/40 p-3 text-center text-[11px] text-nx-gray-dark">
+            Nessun giocatore. Aggiungi qua sotto per iniziare.
+          </p>
+
+          {/* Quick-add inline: niente context-switch alla tab "Giocatori" */}
+          <details class="mt-3">
+            <summary class="cursor-pointer text-xs font-semibold text-nx-cyan hover:underline">+ Aggiungi giocatore</summary>
+            <form id="quick-player-form" class="mt-2 space-y-2">
+              <input name="displayName" required maxlength="40" placeholder="Nome / classe"
+                class="w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+              <input name="role" maxlength="40" placeholder="Ruolo (opz.)"
+                class="w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+              {cfg.is_team_game && (
+                <select name="teamIndex" class="w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none">
+                  <option value="">Squadra…</option>
+                  {(cfg.teams ?? []).map((t, i) => (
+                    <option value={i}>{t.name}</option>
+                  ))}
+                </select>
+              )}
+              <button type="submit" class="w-full rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+ Aggiungi</button>
+            </form>
+          </details>
+
+          <label class="mt-3 flex items-center gap-2 text-xs text-nx-gray-dark">
+            <input id="auto-round" type="checkbox" checked class="rounded text-nx-cyan focus:ring-nx-cyan" />
+            <span>Avanza round automaticamente a fine giro</span>
+          </label>
+        </div>
+
+        <div class="rounded-xl bg-white p-5 shadow-sm">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Fasi speciali</h3>
+          <p class="mt-1 text-[11px] text-nx-gray-dark">Set-up, tiro iniziale, ecc. — cronometrate separatamente dai turni.</p>
+
+          <form id="phase-form" class="mt-3 grid gap-2">
+            <input name="name" required maxlength="60" placeholder="Nome fase (es. Set-up)"
+              class="rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+            <div class="flex gap-2">
+              <input name="minutes" type="number" step="0.1" min="0" required placeholder="Minuti"
+                class="flex-1 rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+              <button type="submit" class="rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+ Aggiungi</button>
+            </div>
+          </form>
+
+          <ul id="phases-list" class="mt-3 divide-y divide-nx-gray-light/20 text-xs"></ul>
+        </div>
+      </aside>
+    </div>
+  </section>
+  )}
+
+  {/* === TAB: Sempre sottocchio === */}
+  <section data-panel="observations" class="mt-6 hidden">
+    <div class="rounded-xl bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-nx-dark">👁 Sempre sottocchio</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Annotazioni live durante la partita: cose che noti come osservatore e che vuoi tenere a mente.
+            Tieni questa tab aperta in un secondo monitor se possibile.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { k: "variabili_visibili", title: "Variabili visibili", hint: "Informazione visibile non vista (es. quanta vita hai?)", color: "bg-sky-50 border-sky-200" },
+          { k: "variabili_invisibili", title: "Variabili invisibili", hint: "Info che il giocatore deve tenere a mente senza riferimenti (es. di chi è il turno?)", color: "bg-amber-50 border-amber-200" },
+          { k: "equita", title: "Equità", hint: "Commenti su ingiustizia del gioco (es. il barbaro è troppo forte!)", color: "bg-rose-50 border-rose-200" },
+          { k: "lamentele", title: "Lamentele", hint: "Lamentele generali (es. dura un sacco!)", color: "bg-purple-50 border-purple-200" },
+        ].map((col) => (
+          <div class={`rounded-lg border ${col.color} p-3`}>
+            <h3 class="text-xs font-bold uppercase tracking-wider text-nx-dark">{col.title}</h3>
+            <p class="mt-0.5 text-[10px] text-nx-gray-dark">{col.hint}</p>
+            <div class="mt-2 flex items-stretch gap-1">
+              <textarea
+                data-obs-input={col.k}
+                maxlength="500"
+                rows="1"
+                placeholder="Aggiungi…"
+                class="nx-obs-textarea flex-1 resize-none overflow-hidden rounded-md border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs leading-snug focus:border-nx-cyan focus:outline-none"
+              ></textarea>
+              <button data-obs-add={col.k} class="shrink-0 self-stretch rounded-md bg-nx-cyan px-2 text-xs font-bold text-white">+</button>
+            </div>
+            <ul data-obs-list={col.k} class="mt-2 space-y-1 text-xs"></ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  {/* === TAB: Checklist === */}
+  {useChecklist && (
+  <section data-panel="checklist" class="mt-6 hidden">
+    <div class="rounded-xl bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Checklist osservazione</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Compila una checklist per ogni fase (Set-up / Inizio / Fine / Partecipata). Score 0-10 + commento per ogni item.
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          {enabledPhases.map((p) => (
+            <button data-create-phase={p} class="rounded-md bg-nx-cyan px-3 py-2 text-xs font-bold uppercase tracking-wider text-white shadow transition hover:-translate-y-0.5">
+              + {phaseLabels[p] ?? p}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div id="chk-instances" class="mt-6 space-y-4">
+        {/* popolato via JS */}
+      </div>
+    </div>
+  </section>
+  )}
+
+  {/* === TAB: Debriefing === */}
+  <section data-panel="debriefing" class="mt-6 hidden">
+    <div class="rounded-xl bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-nx-dark">💬 Debriefing</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Fase post-partita. Trascrivi i commenti dei giocatori (dalle tavole OMNI stampate)
+            e prepara il report con suggerimenti rapidi.
+          </p>
+        </div>
+        <a href={`/sessioni/${session.id}/report`} target="_blank"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">
+          Apri report ↗
+        </a>
+      </div>
+    </div>
+
+    {/* Gradimento questionnaire link */}
+    <div class="mt-6 rounded-xl bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Questionario Gradimento</h3>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Manda questo link ai giocatori (o mostra il QR) per raccogliere il gradimento post-partita.
+            10 item Likert + durata percepita. Le risposte vengono automaticamente aggregate nel report.
+          </p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <code id="gradimento-url" class="rounded bg-nx-off-white px-2 py-1 text-xs text-nx-dark break-all">
+              https://research.nexludica.org/playtest-gradimento/gradimento?session={session.id}
+            </code>
+            <button id="copy-gradimento-url" class="rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">Copia link</button>
+            <a href={`https://research.nexludica.org/playtest-gradimento/gradimento?session=${session.id}`} target="_blank" rel="noopener"
+              class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">
+              Apri questionario ↗
+            </a>
+          </div>
+        </div>
+        <div id="gradimento-qr-container" class="shrink-0">
+          <img
+            src={`/api/playtest/sessions/${session.id}/gradimento-qr.svg`}
+            alt="QR code Gradimento"
+            class="h-32 w-32 rounded border border-nx-gray-light/30 bg-white"
+          />
+        </div>
+      </div>
+    </div>
+
+    {/* OMNI table editor */}
+    <div class="mt-6 rounded-xl bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Tavola OMNI — commenti dei giocatori</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">Una colonna per categoria. Trascrivi verbatim ciò che hanno scritto sulle tavole OMNI A5.</p>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { k: "ottimo", title: "Ottimo", color: "border-emerald-300 bg-emerald-50" },
+          { k: "modificare", title: "Modificare", color: "border-amber-300 bg-amber-50" },
+          { k: "non_chiaro", title: "Non chiaro", color: "border-rose-300 bg-rose-50" },
+          { k: "idee_nuove", title: "Idee nuove", color: "border-sky-300 bg-sky-50" },
+        ].map((col) => (
+          <div class={`rounded-lg border-2 ${col.color} p-3`}>
+            <h4 class="text-sm font-bold uppercase tracking-wider text-nx-dark">{col.title}</h4>
+            <div class="mt-2 space-y-1.5">
+              <input type="text" data-omni-input={col.k} placeholder="Commento"
+                class="w-full rounded-md border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs focus:border-nx-cyan focus:outline-none" />
+              <input type="text" data-omni-author={col.k} placeholder="Autore (opzionale)" maxlength="40"
+                class="w-full rounded-md border border-nx-gray-light/40 bg-white px-2 py-1 text-[11px] focus:border-nx-cyan focus:outline-none" />
+              <button data-omni-add={col.k} class="w-full rounded-md bg-nx-cyan px-2 py-1.5 text-xs font-bold text-white">+ Aggiungi</button>
+            </div>
+            <ul data-omni-list={col.k} class="mt-3 space-y-1.5 text-xs"></ul>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    {/* Report builder */}
+    <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div class="rounded-xl bg-white p-6 shadow-sm">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Criticità → Soluzione proposta</h3>
+        <p class="mt-1 text-xs text-nx-gray-dark">Problemi emersi durante la sessione e come risolverli. Usa i suggerimenti sulla destra per inserirli velocemente.</p>
+        <ul id="rep-criticita" class="mt-4 space-y-2"></ul>
+        <form id="rep-criticita-form" class="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <input name="problema" required maxlength="200" placeholder="Problema"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          <input name="soluzione" maxlength="200" placeholder="Soluzione proposta"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          <button type="submit" class="rounded-md bg-nx-cyan px-3 py-2 text-xs font-bold uppercase tracking-wider text-white">+ Aggiungi</button>
+        </form>
+
+        <h3 class="mt-8 text-sm font-bold uppercase tracking-wider text-nx-dark">Cose poco chiare → Soluzione proposta</h3>
+        <p class="mt-1 text-xs text-nx-gray-dark">Regole/iconografia/concetti ambigui e come renderli chiari.</p>
+        <ul id="rep-chiare" class="mt-4 space-y-2"></ul>
+        <form id="rep-chiare-form" class="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <input name="problema" required maxlength="200" placeholder="Questione poco chiara"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          <input name="soluzione" maxlength="200" placeholder="Soluzione proposta"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          <button type="submit" class="rounded-md bg-nx-cyan px-3 py-2 text-xs font-bold uppercase tracking-wider text-white">+ Aggiungi</button>
+        </form>
+
+        <h3 class="mt-8 text-sm font-bold uppercase tracking-wider text-nx-dark">Sintesi narrativa</h3>
+        <p class="mt-1 text-xs text-nx-gray-dark">Un riassunto in prosa della sessione (opzionale). Finisce in cima al report.</p>
+        <textarea id="rep-narrative" rows="4" maxlength="3000" placeholder="Es. Una sessione partita lenta che si è accesa nel finale…"
+          class="mt-2 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+        <p class="mt-2 text-[11px] text-nx-gray-dark">Il report si salva automaticamente.</p>
+      </div>
+
+      <aside class="space-y-4">
+        <div class="rounded-xl bg-white p-5 shadow-sm">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Suggerimenti rapidi</h3>
+          <p class="mt-1 text-[11px] text-nx-gray-dark">Click su un suggerimento per aggiungerlo al report.</p>
+
+          <div class="mt-3">
+            <h4 class="text-[10px] font-bold uppercase tracking-widest text-nx-cyan">Criticità</h4>
+            <ul id="sugg-criticita" class="mt-2 space-y-1.5"></ul>
+          </div>
+          <div class="mt-5">
+            <h4 class="text-[10px] font-bold uppercase tracking-widest text-nx-cyan">Cose poco chiare</h4>
+            <ul id="sugg-chiare" class="mt-2 space-y-1.5"></ul>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  {/* === TAB: Giocatori === */}
+  <section data-panel="players" class="mt-6 hidden">
+    <div class="rounded-xl bg-white p-6 shadow-sm">
+      <h2 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Giocatori</h2>
+      <p class="mt-1 text-xs text-nx-gray-dark">Aggiungi i partecipanti per poterli selezionare nel cronometro.</p>
+
+      <form id="player-form" class="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_120px_120px_auto]">
+        <input name="displayName" required maxlength="40" placeholder="Nome / classe (es. Barbaro, Marco)"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        <input name="role" maxlength="40" placeholder="Ruolo (opzionale, es. Druido)"
+          class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        {cfg.track_experience !== false ? (
+          <select name="experience"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+            <option value="">Esperienza</option>
+            <option value="Nuovo">Nuovo</option>
+            <option value="Esperto">Esperto</option>
+          </select>
+        ) : (<input type="hidden" name="experience" value="" />)}
+        {cfg.is_team_game ? (
+          <select name="teamIndex"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+            <option value="">Squadra…</option>
+            {(cfg.teams ?? []).map((t, i) => (
+              <option value={i}>{t.name}</option>
+            ))}
+          </select>
+        ) : (<input type="hidden" name="teamIndex" value="" />)}
+        <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">+ Aggiungi</button>
+      </form>
+
+      <ul id="players-list" class="mt-5 divide-y divide-nx-gray-light/20"></ul>
+    </div>
+  </section>
+
+  {/* === RENAME TEAMS MODAL (solo team game) === */}
+  {cfg.is_team_game && (
+  <div id="rename-teams-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-lg font-bold text-nx-dark">Rinomina squadre per questa sessione</h2>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Sostituisce i nomi del gioco solo per questa partita (es. "Devs" e "Designers" invece di "Squadra A" e "Squadra B").
+        Per reset usa "Ripristina default".
+      </p>
+      <form id="rename-teams-form" class="mt-4 space-y-2">
+        <ul id="rename-teams-list" class="space-y-2">
+          {cfg.teams?.map((t, i) => (
+            <li class="flex items-center gap-2">
+              <span class="w-5 text-center text-xs font-mono text-nx-gray-dark">{i + 1}.</span>
+              <input type="text" maxlength="30" value={t.name} data-team-name
+                class="flex-1 rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+            </li>
+          ))}
+        </ul>
+        <div class="flex items-center justify-between gap-2 border-t border-nx-gray-light/20 pt-3">
+          <button type="button" id="rename-teams-reset" class="text-xs font-semibold text-red-500 hover:text-red-700">Ripristina default</button>
+          <div class="flex gap-2">
+            <button type="button" id="rename-teams-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+            <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">Salva</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  )}
+
+  {/* === EDIT SESSION MODAL === */}
+  <div id="session-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-lg font-bold text-nx-dark">Modifica caratteristiche sessione</h2>
+      <form id="session-edit-form" class="mt-4 space-y-3">
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Etichetta *</label>
+          <input name="label" required maxlength="80" value={session.label}
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Data</label>
+            <input name="playedAt" type="date" value={session.playedAt ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Luogo</label>
+            <input name="location" maxlength="80" value={session.location ?? ""}
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Note</label>
+          <textarea name="notes" rows="3" maxlength="5000"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">{session.notes ?? ""}</textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Stato</label>
+          <select name="status" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+            <option value="planned" selected={session.status === "planned"}>Pianificata</option>
+            <option value="in_progress" selected={session.status === "in_progress"}>In corso</option>
+            <option value="completed" selected={session.status === "completed"}>Completata</option>
+            <option value="archived" selected={session.status === "archived"}>Archiviata</option>
+          </select>
+        </div>
+        <p id="session-edit-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+        <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-3">
+          <button type="button" id="session-edit-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+          <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {/* === EDIT TURN MODAL === */}
+  <div id="turn-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-nx-dark/50 backdrop-blur-sm">
+    <div class="mx-4 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+      <h2 class="text-lg font-bold text-nx-dark">Modifica turno</h2>
+      <form id="turn-form" class="mt-4 space-y-3">
+        <input type="hidden" name="id" />
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Round</label>
+            <input name="round" type="number" min="1" max="99" required
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Giocatore</label>
+            <select name="playerId" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">
+              <option value="">— nessuno —</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Durata (mm:ss)</label>
+          <div class="mt-1 flex items-center gap-2">
+            <input name="durMin" type="number" min="0" max="60" required class="w-20 rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-center text-sm focus:border-nx-cyan focus:outline-none" />
+            <span>:</span>
+            <input name="durSec" type="number" min="0" max="59" required class="w-20 rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-center text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">{cfg.points_label_1 ?? "Punti 1"}</label>
+            <input name="points1" type="number" step="0.5"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">{cfg.points_label_2 ?? "Punti 2"}</label>
+            <input name="points2" type="number" step="0.5"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Evento</label>
+          <input name="event" maxlength="80"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <p id="turn-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"></p>
+        <div class="flex items-center justify-between gap-2 border-t border-nx-gray-light/20 pt-3">
+          <button type="button" id="turn-delete" class="rounded-md border border-red-300 px-3 py-2 text-xs font-bold uppercase tracking-wider text-red-600 hover:bg-red-50">Elimina</button>
+          <div class="flex gap-2">
+            <button type="button" id="turn-cancel" class="rounded-md px-3 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-cyan">Annulla</button>
+            <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">Salva</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="application/json" id="bootstrap" set:html={JSON.stringify(bootstrap)} />
+
+  <style is:global>
+    .nx-tab {
+      padding: 0.5rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: rgb(var(--nx-gray-dark, 102 102 102));
+      border-bottom: 3px solid transparent;
+      margin-bottom: -1px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .nx-tab:hover { color: #05abc4; }
+    .nx-tab-active { color: #05abc4; border-bottom-color: #05abc4; }
+    .chk-row { display: grid; grid-template-columns: 1fr 70px; gap: 8px; align-items: start; }
+    .chk-row textarea { font-size: 12px; resize: vertical; }
+    .chk-score-stars { display: inline-flex; gap: 2px; }
+    /* Drag-and-drop turn order */
+    .nx-drag-item { transition: border-color 0.15s, background-color 0.15s; }
+    .nx-drag-item.nx-drag-over { border-top: 3px solid #05abc4; padding-top: calc(0.375rem - 1px); }
+    .nx-drag-handle { font-size: 1.1rem; line-height: 1; padding: 0 2px; cursor: grab; user-select: none; }
+    .nx-drag-handle:active { cursor: grabbing; }
+
+    /* Flash di feedback su SPACE (cambio giocatore corrente) */
+    @keyframes nx-flash-bg {
+      0%   { background-color: rgba(5, 171, 196, 0.35); transform: scale(1.03); }
+      100% { background-color: transparent; transform: scale(1); }
+    }
+    .nx-flash { animation: nx-flash-bg 0.7s ease-out; }
+    @keyframes nx-flash-color {
+      0%   { color: #ffffff; text-shadow: 0 0 12px rgba(5,171,196,0.9); }
+      100% { color: inherit; text-shadow: none; }
+    }
+    .nx-flash-text { animation: nx-flash-color 0.7s ease-out; }
+
+    /* Timer sticky in alto su desktop (Cronometro tab):
+       riduce il context-switch visivo dello scorrimento durante una sessione. */
+    @media (min-width: 1024px) {
+      [data-panel="timer"] .nx-timer-sticky {
+        position: sticky;
+        top: 12px;
+        z-index: 5;
+      }
+    }
+  </style>
+
+  <script is:inline src="/scripts/playtest-session.js"></script>
+</PlaytestLayout>

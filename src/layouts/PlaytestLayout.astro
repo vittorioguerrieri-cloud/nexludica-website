@@ -1,0 +1,98 @@
+---
+/**
+ * Layout per il sottodominio playtest.nexludica.org.
+ * Header minimale con link al sito principale + indicatore utente loggato.
+ *
+ * Accesso riservato: ogni pagina del sottodominio deve chiamare getUser()
+ * e fare redirect a /login (sul dominio principale) se non loggato.
+ * Il login e' centralizzato sul dominio principale e la sessione e' cross-
+ * subdomain (cookie su .nexludica.org).
+ */
+// Montserrat servito dal nostro dominio e non da Google Fonts: caricarlo da
+// Google trasmette l'IP di ogni visitatore senza consenso (LG Muenchen,
+// 20/1/2022). Il font variabile copre tutti i pesi usati, da 400 a 900.
+import "@fontsource-variable/montserrat";
+import "../styles/global.css";
+import { getUser } from "../server/guards";
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** Se true, niente padding (per la pagina sessione in modalita' "tool live") */
+  fluid?: boolean;
+  /** Breadcrumbs come array di { label, href }, ultimo non cliccabile */
+  crumbs?: Array<{ label: string; href?: string }>;
+}
+
+const {
+  title = "NexLudica Playtest",
+  description = "Piattaforma di playtest di NexLudica APS.",
+  fluid = false,
+  crumbs = [],
+} = Astro.props;
+
+// Auth check: ogni pagina che usa questo layout deve essere SSR (`prerender = false`)
+// e deve verificare l'utente nel proprio frontmatter prima di rendere il layout.
+// La verifica qui sotto e' una rete di sicurezza che mostra solo l'header senza
+// contenuti se per qualche motivo si arriva qui non loggati.
+const user = await getUser(Astro);
+---
+
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/images/branding/logo-square.svg" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="robots" content="noindex" />
+  </head>
+  <body class="min-h-screen bg-nx-off-white text-nx-dark">
+    <header class="border-b border-nx-gray-light/20 bg-white">
+      <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4">
+        <a href="/" class="flex items-center gap-3 no-underline">
+          <img src="/images/branding/logo-horizontal-equity.png" srcset="/images/branding/logo-horizontal-equity.png 1x, /images/branding/logo-horizontal-equity@2x.png 2x" alt="NexLudica" class="h-9 w-auto" />
+          <span class="border-l border-nx-gray-light/30 pl-3 text-xs font-bold uppercase tracking-[0.2em] text-nx-cyan">Playtest</span>
+        </a>
+        <div class="flex items-center gap-3 text-xs text-nx-gray-dark">
+          {user && (
+            <span class="hidden sm:inline">{user.email}</span>
+          )}
+          <a href="https://nexludica.org/area-soci" class="font-semibold uppercase tracking-wider no-underline hover:text-nx-cyan">
+            ← Area soci
+          </a>
+        </div>
+      </div>
+      {crumbs.length > 0 && (
+        <div class="border-t border-nx-gray-light/10 bg-nx-off-white">
+          <nav class="mx-auto flex max-w-6xl flex-wrap items-center gap-1 px-4 py-2 text-xs text-nx-gray-dark">
+            <a href="/" class="no-underline hover:text-nx-cyan">Giochi</a>
+            {crumbs.map((c) => (
+              <>
+                <span class="opacity-40">/</span>
+                {c.href ? (
+                  <a href={c.href} class="no-underline hover:text-nx-cyan">{c.label}</a>
+                ) : (
+                  <span class="font-semibold text-nx-dark">{c.label}</span>
+                )}
+              </>
+            ))}
+          </nav>
+        </div>
+      )}
+    </header>
+
+    <main class={fluid ? "mx-auto max-w-6xl px-4 py-4" : "mx-auto max-w-6xl px-4 py-8"}>
+      <slot />
+    </main>
+
+    <footer class="mt-16 border-t border-nx-gray-light/20 bg-white">
+      <div class="mx-auto max-w-6xl px-4 py-6 text-center text-xs text-nx-gray-dark">
+        Piattaforma di playtest di <a href="https://nexludica.org" class="font-semibold text-nx-cyan no-underline hover:underline">NexLudica APS</a>.
+        Accesso riservato ai soci.
+      </div>
+    </footer>
+  </body>
+</html>

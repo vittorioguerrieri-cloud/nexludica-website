@@ -1,0 +1,262 @@
+---
+/**
+ * Dettaglio missione: consuntivo + budget + ripartizione per categoria +
+ * elenco transazioni. Modifica inline dei dati della missione. Solo admin.
+ */
+import AreaSociLayout from "../../../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../../../server/db";
+import { getUser } from "../../../../../server/guards";
+import { getMissionReport, listMissionParticipants, listSelectableMembers } from "../../../../../server/missions";
+import { listOpportunities } from "../../../../../server/opportunities";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const id = Astro.params.id as string;
+const env = await getEnv();
+const db = getDb(env as Env);
+const report = db ? await getMissionReport(db, id) : null;
+if (!report) return Astro.redirect("/area-soci/admin/finanze");
+
+const opportunities = db ? await listOpportunities(db) : [];
+const linkableOpps = opportunities.filter((o) => !o.archived);
+const m = report.mission;
+
+const participants = db ? await listMissionParticipants(db, id) : [];
+const members = db ? await listSelectableMembers(db) : [];
+const participantIds = new Set(participants.map((p) => p.userId));
+const availableMembers = members.filter((mem) => !participantIds.has(mem.id));
+
+const eur = (n: number) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" }).format(n);
+function fmtDate(iso: string | null) {
+  if (!iso) return "—";
+  const mm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return mm ? `${mm[3]}/${mm[2]}/${mm[1]}` : iso;
+}
+const overBudget = m.budgetEur != null && report.spent > m.budgetEur;
+const pct = m.budgetEur != null && m.budgetEur > 0 ? Math.min(100, Math.round((report.spent / m.budgetEur) * 100)) : null;
+---
+
+<AreaSociLayout title={`${m.title} — Missione`} active="finanze">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <a href="/area-soci/admin/finanze" class="text-xs text-nx-gray-dark no-underline hover:text-nx-cyan">← Bilancio e fondi</a>
+      <h2 class="mt-1 text-2xl font-bold text-nx-dark">{m.title}</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        {[m.location, m.startDate ? fmtDate(m.startDate) + (m.endDate && m.endDate !== m.startDate ? " – " + fmtDate(m.endDate) : "") : null].filter(Boolean).join(" · ") || "Nessuna data/luogo"}
+        <span class={`ml-2 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wider ${m.status === "conclusa" ? "bg-nx-gray-light/20 text-nx-gray-dark" : "bg-nx-cyan-light/40 text-nx-cyan"}`}>{m.status}</span>
+      </p>
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <section class="mt-6 grid gap-3 sm:grid-cols-4">
+    <div class="rounded-lg bg-nx-off-white p-4">
+      <p class="text-[10px] uppercase text-nx-gray-dark">Speso</p>
+      <p class={`mt-1 text-2xl font-black ${overBudget ? "text-red-600" : "text-nx-dark"}`}>{eur(report.spent)}</p>
+    </div>
+    <div class="rounded-lg bg-nx-off-white p-4">
+      <p class="text-[10px] uppercase text-nx-gray-dark">Budget</p>
+      <p class="mt-1 text-2xl font-black text-nx-gray-dark">{m.budgetEur != null ? eur(m.budgetEur) : "—"}</p>
+    </div>
+    <div class="rounded-lg bg-nx-off-white p-4">
+      <p class="text-[10px] uppercase text-nx-gray-dark">Residuo budget</p>
+      <p class={`mt-1 text-2xl font-black ${report.budgetLeft == null ? "text-nx-gray-dark" : report.budgetLeft >= 0 ? "text-emerald-600" : "text-red-600"}`}>{report.budgetLeft != null ? eur(report.budgetLeft) : "—"}</p>
+    </div>
+    <div class="rounded-lg bg-nx-off-white p-4">
+      <p class="text-[10px] uppercase text-nx-gray-dark">Entrate collegate</p>
+      <p class="mt-1 text-2xl font-black text-emerald-600">{eur(report.totalIn)}</p>
+      <p class="text-[10px] text-nx-gray-dark">{report.count} movimenti</p>
+    </div>
+  </section>
+
+  {pct != null && (
+    <div class="mt-3">
+      <div class="h-2 w-full overflow-hidden rounded-full bg-nx-gray-light/20">
+        <div class={`h-full ${overBudget ? "bg-red-500" : "bg-nx-cyan"}`} style={`width:${pct}%`}></div>
+      </div>
+      <p class="mt-1 text-[11px] text-nx-gray-dark">{pct}% del budget {overBudget ? "(sforato)" : "utilizzato"}</p>
+    </div>
+  )}
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_320px]">
+    <!-- Ripartizione + transazioni -->
+    <div class="space-y-6">
+      <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+        <div class="border-b border-nx-gray-light/20 px-6 py-4"><h3 class="text-base font-bold text-nx-dark">Spesa per categoria</h3></div>
+        {report.byCategory.length === 0 ? (
+          <p class="px-6 py-6 text-center text-sm text-nx-gray-dark">Nessuna transazione assegnata a questa missione. Vai nella scheda Transazioni del bilancio e seleziona questa missione.</p>
+        ) : (
+          <table class="w-full text-sm">
+            <tbody class="divide-y divide-nx-gray-light/20">
+              {report.byCategory.map((c) => (
+                <tr>
+                  <td class="px-6 py-2 capitalize text-nx-dark">{c.category}</td>
+                  <td class="px-6 py-2 text-right font-mono text-red-600">{eur(c.out)}</td>
+                  <td class="px-6 py-2 text-right text-xs text-nx-gray-dark">{c.count} mov.</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+        <div class="border-b border-nx-gray-light/20 px-6 py-4"><h3 class="text-base font-bold text-nx-dark">Transazioni ({report.count})</h3></div>
+        {report.transactions.length === 0 ? (
+          <p class="px-6 py-6 text-center text-sm text-nx-gray-dark">Nessuna transazione.</p>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+                <tr>
+                  <th class="px-4 py-2 text-left">Data</th>
+                  <th class="px-4 py-2 text-left">Descrizione</th>
+                  <th class="px-4 py-2 text-left">Categoria</th>
+                  <th class="px-4 py-2 text-right">Importo</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-nx-gray-light/20">
+                {report.transactions.map((t) => (
+                  <tr>
+                    <td class="whitespace-nowrap px-4 py-2 text-xs text-nx-gray-dark">{fmtDate(t.opDate)}</td>
+                    <td class="px-4 py-2 text-nx-dark">{t.description || t.counterparty || "—"}</td>
+                    <td class="px-4 py-2 text-xs capitalize text-nx-gray-dark">{t.category || "—"}</td>
+                    <td class={`whitespace-nowrap px-4 py-2 text-right font-mono ${t.amount >= 0 ? "text-emerald-600" : "text-red-600"}`}>{eur(t.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <div class="space-y-6">
+    <!-- Partecipanti -->
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Partecipanti <span class="text-sm font-normal text-nx-gray-dark">({participants.length})</span></h3>
+      {participants.length === 0 ? (
+        <p class="mt-2 text-xs text-nx-gray-dark">Nessun socio assegnato. Aggiungine uno qui sotto.</p>
+      ) : (
+        <ul class="mt-3 divide-y divide-nx-gray-light/20">
+          {participants.map((p) => (
+            <li class="flex items-center justify-between gap-2 py-2" data-participant-row data-user-id={p.userId}>
+              <div class="min-w-0">
+                <span class="block truncate text-sm font-medium text-nx-dark">{p.name}</span>
+                {p.note && <span class="block truncate text-[11px] text-nx-gray-dark">{p.note}</span>}
+              </div>
+              <button type="button" data-participant-remove={p.userId} class="shrink-0 rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50">Rimuovi</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form id="participant-add" class="mt-4 space-y-2" data-mission-id={m.id}>
+        <select name="userId" required class="block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+          <option value="">— scegli un socio —</option>
+          {availableMembers.map((mem) => (
+            <option value={mem.id}>{mem.name}</option>
+          ))}
+        </select>
+        <input name="note" maxlength="80" placeholder="Ruolo / nota (opzionale, es. relatore)" class="block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        <button type="submit" class="w-full rounded-lg bg-nx-cyan px-4 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue disabled:opacity-50" disabled={availableMembers.length === 0}>
+          {availableMembers.length === 0 ? "Tutti i soci aggiunti" : "Aggiungi partecipante"}
+        </button>
+        <span id="participant-status" class="block text-xs"></span>
+      </form>
+    </div>
+
+    <!-- Modifica missione -->
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Dati missione</h3>
+      <form id="mission-edit" class="mt-3 space-y-3 text-sm" data-id={m.id}>
+        <label class="block text-xs text-nx-gray-dark">Titolo<input name="title" value={m.title} maxlength="160" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-xs text-nx-gray-dark">Evento collegato
+          <select name="opportunityId" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+            <option value="">— nessuno —</option>
+            {linkableOpps.map((o) => (
+              <option value={o.id} selected={m.opportunityId === o.id}>{o.title}</option>
+            ))}
+          </select>
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="block text-xs text-nx-gray-dark">Dal<input name="startDate" type="date" value={m.startDate ?? ""} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+          <label class="block text-xs text-nx-gray-dark">Al<input name="endDate" type="date" value={m.endDate ?? ""} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        </div>
+        <label class="block text-xs text-nx-gray-dark">Luogo<input name="location" value={m.location ?? ""} maxlength="160" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-xs text-nx-gray-dark">Budget €<input name="budgetEur" type="number" step="0.01" min="0" value={m.budgetEur ?? ""} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" /></label>
+        <label class="block text-xs text-nx-gray-dark">Stato
+          <select name="status" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+            <option value="pianificata" selected={m.status === "pianificata"}>Pianificata</option>
+            <option value="conclusa" selected={m.status === "conclusa"}>Conclusa</option>
+          </select>
+        </label>
+        <label class="block text-xs text-nx-gray-dark">Note<textarea name="notes" rows="3" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">{m.notes ?? ""}</textarea></label>
+        <button type="submit" class="w-full rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Salva</button>
+        <span id="edit-status" class="block text-xs"></span>
+      </form>
+    </div>
+    </div>
+  </div>
+</AreaSociLayout>
+
+<script is:inline>
+  (function () {
+    // Partecipanti: aggiungi
+    const pForm = document.getElementById("participant-add");
+    const pStatus = document.getElementById("participant-status");
+    pForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const missionId = pForm.getAttribute("data-mission-id");
+      const fd = new FormData(pForm);
+      const userId = fd.get("userId");
+      if (!userId) { pStatus.textContent = "Scegli un socio"; pStatus.className = "block text-xs text-red-600"; return; }
+      pStatus.textContent = "Aggiunta…"; pStatus.className = "block text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/finance/missions/" + encodeURIComponent(missionId) + "/participants", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, note: fd.get("note") || null }),
+        });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { pStatus.textContent = "✗ " + (d.error || res.status); pStatus.className = "block text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { pStatus.textContent = "Errore di rete"; pStatus.className = "block text-xs text-red-600"; }
+    });
+    // Partecipanti: rimuovi
+    document.querySelectorAll("[data-participant-remove]").forEach((btn) => btn.addEventListener("click", async () => {
+      const userId = btn.getAttribute("data-participant-remove");
+      const missionId = pForm && pForm.getAttribute("data-mission-id");
+      if (!missionId) return;
+      await fetch("/api/admin/finance/missions/" + encodeURIComponent(missionId) + "/participants?userId=" + encodeURIComponent(userId), { method: "DELETE" });
+      location.reload();
+    }));
+
+    const form = document.getElementById("mission-edit");
+    const status = document.getElementById("edit-status");
+    form?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const id = form.getAttribute("data-id");
+      const fd = new FormData(form);
+      const body = {
+        title: fd.get("title"),
+        opportunityId: fd.get("opportunityId") || null,
+        startDate: fd.get("startDate") || null,
+        endDate: fd.get("endDate") || null,
+        location: fd.get("location") || null,
+        budgetEur: fd.get("budgetEur") || null,
+        status: fd.get("status"),
+        notes: fd.get("notes") || null,
+      };
+      status.textContent = "Salvataggio…"; status.className = "block text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/finance/missions?id=" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { status.textContent = "✗ errore"; status.className = "block text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { status.textContent = "Errore di rete"; status.className = "block text-xs text-red-600"; }
+    });
+  })();
+</script>

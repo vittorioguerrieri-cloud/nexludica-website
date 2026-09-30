@@ -24,19 +24,28 @@ const valOr = (s: string | null) => s ?? "";
     ← Torna alla lista
   </a>
 
-  <div class="mt-4 flex items-center gap-4">
-    {member.photoUrl ? (
-      <img src={member.photoUrl} alt="" class="h-16 w-16 rounded-full object-cover" />
-    ) : (
-      <span class="flex h-16 w-16 items-center justify-center rounded-full bg-nx-cyan-light text-lg font-bold text-nx-cyan">
-        {member.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
-      </span>
-    )}
-    <div>
+  <div class="mt-4 flex items-start gap-4">
+    <div class="relative">
+      <div id="photo-preview-wrap" class="h-20 w-20 shrink-0 overflow-hidden rounded-full">
+        {member.photoUrl ? (
+          <img id="photo-preview-img" src={member.photoUrl} alt="" loading="lazy" decoding="async" class="h-20 w-20 rounded-full object-cover" />
+        ) : (
+          <span id="photo-preview-initials" class="flex h-20 w-20 items-center justify-center rounded-full bg-nx-cyan-light text-2xl font-bold text-nx-cyan">
+            {member.name.split(" ").filter(Boolean).map((s) => s[0]).slice(0, 2).join("")}
+          </span>
+        )}
+      </div>
+      <label for="admin-photo-file" class="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-2 border-white bg-nx-cyan text-xs text-white shadow-md transition hover:bg-nx-blue" title="Carica nuova foto">
+        📷
+      </label>
+      <input id="admin-photo-file" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" />
+    </div>
+    <div class="flex-1">
       <h2 class="text-2xl font-bold text-nx-dark">{member.name}</h2>
       <p class="text-sm text-nx-gray-dark">
         {member.email.endsWith(".invalid") ? <span class="italic text-nx-gray-light">email da definire</span> : member.email}
       </p>
+      <p id="admin-photo-status" class="mt-1 text-xs"></p>
     </div>
   </div>
 
@@ -44,14 +53,15 @@ const valOr = (s: string | null) => s ?? "";
     <!-- Ruolo + stato -->
     <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
       <h3 class="text-base font-bold text-nx-dark">Ruolo e stato</h3>
-      <div class="mt-4 grid gap-5 sm:grid-cols-3">
+      <div class="mt-4 grid gap-5 sm:grid-cols-2">
         <div>
-          <label class="block text-sm font-medium text-nx-dark">Ruolo</label>
+          <label class="block text-sm font-medium text-nx-dark">Ruolo piattaforma</label>
           <select name="role" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
-            <option value="admin"        selected={member.role === "admin"}>Admin (Presidente)</option>
-            <option value="member"       selected={member.role === "member"}>Socio</option>
-            <option value="collaborator" selected={member.role === "collaborator"}>Collaboratore</option>
+            <option value="admin"        selected={member.role === "admin"}>Admin</option>
+            <option value="member"       selected={member.role === "member"}>Sociə</option>
+            <option value="collaborator" selected={member.role === "collaborator"}>Collaboratorə</option>
           </select>
+          <p class="mt-1 text-[10px] text-nx-gray-dark">Determina i permessi su questa piattaforma.</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-nx-dark">Stato iscrizione</label>
@@ -59,12 +69,30 @@ const valOr = (s: string | null) => s ?? "";
             <option value="active"     selected={member.membershipStatus === "active"}>Attivo</option>
             <option value="pending"    selected={member.membershipStatus === "pending"}>In attesa</option>
             <option value="suspended"  selected={member.membershipStatus === "suspended"}>Sospeso</option>
-            <option value="former"     selected={member.membershipStatus === "former"}>Ex socio</option>
+            <option value="former"     selected={member.membershipStatus === "former"}>Ex sociə</option>
           </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Ruolo Consiglio Direttivo</label>
+          <select name="boardRole" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm">
+            <option value="none"             selected={!member.boardRole}>— Non in direttivo —</option>
+            <option value="presidente"       selected={member.boardRole === "presidente"}>Presidente</option>
+            <option value="vice_presidente"  selected={member.boardRole === "vice_presidente"}>Vice Presidente</option>
+            <option value="segretario"       selected={member.boardRole === "segretario"}>Segretario/a</option>
+            <option value="tesoriere"        selected={member.boardRole === "tesoriere"}>Tesoriere</option>
+            <option value="consigliere"      selected={member.boardRole === "consigliere"}>Consigliere</option>
+          </select>
+          <p class="mt-1 text-[10px] text-nx-gray-dark">Usato per auto-fill dei partecipanti ai verbali di Consiglio Direttivo.</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-nx-dark">Etichetta ruolo (pubblica)</label>
           <input name="roleLabel" value={valOr(member.roleLabel)} placeholder="es. Presidente" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+          <p class="mt-1 text-[10px] text-nx-gray-dark">Mostrata su /chi-siamo se diversa dal ruolo direttivo.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Email nexludica (ufficiale)</label>
+          <input name="emailNexludica" type="email" value={valOr(member.emailNexludica)} placeholder="nome.cognome@nexludica.org" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+          <p class="mt-1 text-[10px] text-nx-gray-dark">Opzionale. Deve finire con @nexludica.org. L'email privata (login) è <span class="font-mono">{member.email}</span>.</p>
         </div>
       </div>
 
@@ -72,7 +100,7 @@ const valOr = (s: string | null) => s ?? "";
       <div class="mt-6 space-y-3 rounded-lg border border-nx-cyan/30 bg-nx-cyan-light/30 p-4">
         <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Visibilità pubblica</p>
         <p class="text-xs text-nx-gray-dark">
-          Override delle preferenze del socio. Normalmente è il socio stesso a gestirle dal suo profilo.
+          Override delle preferenze della persona iscritta. Normalmente sono gestite direttamente dal suo profilo.
         </p>
         <label class="flex items-start gap-3">
           <input type="checkbox" id="publicVisible" name="publicVisible" value="1"
@@ -101,6 +129,11 @@ const valOr = (s: string | null) => s ?? "";
         <div>
           <label class="block text-sm font-medium text-nx-dark">Telefono</label>
           <input name="phone" value={valOr(member.phone)} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">IBAN</label>
+          <input name="iban" value={valOr(member.iban)} maxlength="34" placeholder="IT60 X054 2811 1010 0000 0123 456" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm uppercase" />
+          <p class="mt-1 text-xs text-nx-gray-dark">Serve per i pagamenti delle notule (compensi con ritenuta d'acconto).</p>
         </div>
         <div>
           <label class="block text-sm font-medium text-nx-dark">Data di nascita</label>
@@ -184,16 +217,73 @@ const valOr = (s: string | null) => s ?? "";
 
 <script is:inline define:vars={{ memberId: id }}>
   (function () {
+    // === Photo upload widget ===
+    const photoFile = document.getElementById("admin-photo-file");
+    const photoStatus = document.getElementById("admin-photo-status");
+    const previewWrap = document.getElementById("photo-preview-wrap");
+    if (photoFile && previewWrap) {
+      const ALLOWED_PHOTO = new Set(["image/jpeg", "image/png", "image/webp"]);
+      photoFile.addEventListener("change", async () => {
+        const f = photoFile.files && photoFile.files[0];
+        if (!f) return;
+        if (!ALLOWED_PHOTO.has(f.type)) {
+          photoStatus.textContent = "Tipo file non supportato (JPG/PNG/WebP)";
+          photoStatus.className = "mt-1 text-xs text-red-600";
+          photoFile.value = "";
+          return;
+        }
+        if (f.size > 5 * 1024 * 1024) {
+          photoStatus.textContent = "File troppo grande (max 5 MB)";
+          photoStatus.className = "mt-1 text-xs text-red-600";
+          photoFile.value = "";
+          return;
+        }
+        photoStatus.textContent = "Caricamento in corso...";
+        photoStatus.className = "mt-1 text-xs text-nx-gray-dark";
+        const fd = new FormData();
+        fd.append("photo", f);
+        try {
+          const res = await fetch("/api/admin/members/" + encodeURIComponent(memberId) + "/photo", {
+            method: "POST",
+            body: fd,
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            photoStatus.textContent = "Errore: " + (data.error || res.status);
+            photoStatus.className = "mt-1 text-xs text-red-600";
+          } else {
+            // Aggiorna preview con la nuova foto (cache-bust).
+            // Usiamo createElement invece di innerHTML per evitare interpolazione
+            // diretta di URL nel DOM (anti-pattern anche se data.photoUrl viene
+            // dal nostro endpoint).
+            while (previewWrap.firstChild) previewWrap.removeChild(previewWrap.firstChild);
+            const img = document.createElement("img");
+            img.src = data.photoUrl + "?t=" + Date.now();
+            img.alt = "";
+            img.className = "h-20 w-20 rounded-full object-cover";
+            previewWrap.appendChild(img);
+            photoStatus.textContent = "✓ Foto caricata";
+            photoStatus.className = "mt-1 text-xs text-emerald-600";
+          }
+        } catch (e) {
+          photoStatus.textContent = "Errore di rete";
+          photoStatus.className = "mt-1 text-xs text-red-600";
+        }
+      });
+    }
+
+    // === Form save ===
     const form = document.getElementById("member-form");
     const status = document.getElementById("member-status");
     if (!form) return;
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const btn = form.querySelector("button[type=submit]");
+      if (btn) btn.disabled = true;
       status.textContent = "Salvataggio...";
       status.className = "text-sm text-nx-gray-dark";
       const fd = new FormData(form);
       const body = Object.fromEntries(fd.entries());
-      // Checkbox: vengono inclusi solo se selezionati
       body.publicVisible = fd.has("publicVisible") ? "1" : "0";
       body.emailPublic = fd.has("emailPublic") ? "1" : "0";
       try {
@@ -213,6 +303,8 @@ const valOr = (s: string | null) => s ?? "";
       } catch (e) {
         status.textContent = "Errore di rete";
         status.className = "text-sm text-red-600";
+      } finally {
+        if (btn) btn.disabled = false;
       }
     });
   })();

@@ -1,0 +1,600 @@
+---
+/**
+ * Modifica di un verbale in stato 'draft'.
+ *
+ * Struttura: stesso form di /verbali/nuovo, ma con valori pre-caricati dal
+ * verbale esistente e submit verso PATCH /api/verbali/:id.
+ *
+ * I dati pre-esistenti vengono inseriti nel bootstrap JSON; al primo load
+ * dello script, lo stato (pool, extras, agenda, signers) viene rideratto
+ * dal verbale storico. Per il pool dei partecipanti attesi, una volta
+ * fetched il pool tramite expected-attendees API, facciamo match per nome:
+ *   - presenti già nel pool → checkbox spuntata
+ *   - assenti già nel pool → checkbox NON spuntata (+ flag giustificato)
+ *   - presenti non nel pool → vanno in extraPresent
+ *   - assenti non nel pool → vanno in extraAbsent
+ */
+import AreaSociLayout from "../../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../../server/db";
+import { getUser } from "../../../../server/guards";
+import { getVerbale, DEFAULT_SIGNERS } from "../../../../server/verbali";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return new Response("Solo admin", { status: 403 });
+
+const { id } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db || !id) return new Response("Not found", { status: 404 });
+
+const v = await getVerbale(db, String(id));
+if (!v) return new Response("Verbale non trovato", { status: 404 });
+if (v.status !== "draft") {
+  return new Response(
+    "Solo le bozze sono modificabili. Questo verbale è in stato: " + v.status,
+    { status: 400 },
+  );
+}
+
+const bootstrap = {
+  id: v.id,
+  type: v.type,
+  title: v.title,
+  meetingDate: v.meetingDate,
+  meetingTime: v.meetingTime,
+  meetingEndTime: v.meetingEndTime,
+  location: v.location,
+  presidentName: v.presidentName,
+  secretaryName: v.secretaryName,
+  attendeesPresent: v.attendeesPresent,
+  attendeesAbsent: v.attendeesAbsent,
+  agendaItems: v.agendaItems,
+  agendaMarkdown: v.agendaMarkdown,
+  bodyExtra: v.bodyExtra,
+  signers: v.signers,
+};
+const bootstrapJson = JSON.stringify(bootstrap);
+const defaultSignersJson = JSON.stringify(DEFAULT_SIGNERS);
+---
+
+<AreaSociLayout title={`Modifica: ${v.title}`} active="verbali">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <a href={`/area-soci/verbali/${v.id}`} class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">← Torna al verbale</a>
+      <h2 class="mt-2 text-2xl font-bold text-nx-dark">Modifica bozza</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Modifica i campi e salva. Quando sei pronto/a, torna alla pagina del verbale e invia in firma.
+      </p>
+    </div>
+  </div>
+
+  <form id="verbale-form" class="mt-8 space-y-6">
+    {/* === INTESTAZIONE === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Intestazione</h3>
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Tipo *</label>
+          <select id="f-type" name="type" required
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">
+            <option value="assemblea_ordinaria">Assemblea Ordinaria dei Soci</option>
+            <option value="assemblea_straordinaria">Assemblea Straordinaria dei Soci</option>
+            <option value="consiglio_direttivo">Consiglio Direttivo</option>
+            <option value="riunione_operativa">Riunione operativa / team</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Titolo *</label>
+          <input id="f-title" name="title" required maxlength="200"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Data *</label>
+          <input id="f-date" name="meetingDate" type="date" required
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Ora inizio</label>
+          <input id="f-time" name="meetingTime" type="time"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div class="sm:col-start-1">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Ora fine</label>
+          <input id="f-end-time" name="meetingEndTime" type="time"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Luogo</label>
+          <input id="f-location" name="location" maxlength="200" placeholder="es. Sede legale, Vico Barnabiti 10 — Genova"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Presidente seduta</label>
+          <input id="f-president" name="presidentName" maxlength="80"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold uppercase tracking-wider text-nx-dark">Segretario verbalizzante</label>
+          <input id="f-secretary" name="secretaryName" maxlength="80"
+            class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+        </div>
+      </div>
+    </section>
+
+    {/* === PARTECIPANTI === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Partecipanti</h3>
+      <p id="expected-hint" class="mt-1 text-xs text-nx-gray-dark">Caricamento partecipanti attesi…</p>
+
+      <div id="expected-pool" class="mt-4 hidden">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Partecipanti attesi (<span id="expected-count">0</span>)
+          </h4>
+          <div class="flex gap-1 text-[11px]">
+            <button type="button" id="check-all" class="rounded border border-nx-gray-light/40 px-2 py-1 hover:border-nx-cyan hover:text-nx-cyan">Tutti presenti</button>
+            <button type="button" id="uncheck-all" class="rounded border border-nx-gray-light/40 px-2 py-1 hover:border-nx-cyan hover:text-nx-cyan">Tutti assenti</button>
+          </div>
+        </div>
+        <ul id="pool-list" class="mt-3 divide-y divide-nx-gray-light/20"></ul>
+      </div>
+
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        <div class="min-w-0">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Presenti (<span id="present-count">0</span>)
+          </h4>
+          <ul id="present-list" class="mt-2 space-y-1.5"></ul>
+          <details class="mt-2">
+            <summary class="cursor-pointer text-xs text-nx-cyan hover:underline">+ Aggiungi presente extra</summary>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <input id="add-present-name" placeholder="Nome" maxlength="80"
+                class="min-w-0 flex-1 basis-32 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+              <input id="add-present-role" placeholder="Ruolo (opz.)" maxlength="80"
+                class="min-w-0 flex-1 basis-32 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+              <button type="button" id="add-present-btn" class="shrink-0 rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+</button>
+            </div>
+          </details>
+        </div>
+        <div class="min-w-0">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Assenti (<span id="absent-count">0</span>)
+          </h4>
+          <ul id="absent-list" class="mt-2 space-y-1.5"></ul>
+          <details class="mt-2">
+            <summary class="cursor-pointer text-xs text-nx-cyan hover:underline">+ Aggiungi assente extra</summary>
+            <div class="mt-2 space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <input id="add-absent-name" placeholder="Nome" maxlength="80"
+                  class="min-w-0 flex-1 basis-32 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+                <button type="button" id="add-absent-btn" class="shrink-0 rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+</button>
+              </div>
+              <label class="flex items-center gap-1 text-xs text-nx-gray-dark">
+                <input id="add-absent-justified" type="checkbox" class="rounded text-nx-cyan focus:ring-nx-cyan" />
+                giustificato
+              </label>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    {/* === ORDINE DEL GIORNO === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Ordine del giorno e decisioni</h3>
+        <div class="inline-flex rounded-md border border-nx-gray-light/40 p-0.5 text-xs">
+          <button type="button" id="agenda-mode-structured"
+            class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none bg-nx-cyan text-white">Strutturato</button>
+          <button type="button" id="agenda-mode-markdown"
+            class="rounded px-3 py-1.5 font-bold uppercase tracking-wider transition-colors focus:outline-none text-nx-dark hover:bg-nx-off-white">Markdown</button>
+        </div>
+      </div>
+      <div id="agenda-structured" class="mt-4">
+        <ul id="agenda-list" class="space-y-3"></ul>
+        <button type="button" id="add-agenda-btn"
+          class="mt-3 w-full rounded-md border-2 border-dashed border-nx-cyan/40 px-3 py-2 text-sm font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light">
+          + Aggiungi punto
+        </button>
+      </div>
+      <div id="agenda-markdown-wrap" class="mt-4 hidden">
+        <p class="text-[11px] text-nx-gray-dark">Scrivi liberamente in markdown.</p>
+        <textarea id="agenda-markdown" name="agendaMarkdown" rows="14" maxlength="20000"
+          class="mt-2 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 font-mono text-xs leading-relaxed focus:border-nx-cyan focus:outline-none"></textarea>
+      </div>
+    </section>
+
+    {/* === NOTE === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Note aggiuntive</h3>
+      <textarea id="f-body-extra" name="bodyExtra" rows="4" maxlength="10000"
+        class="mt-2 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+    </section>
+
+    {/* === FIRMATARI === */}
+    <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+      <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Firmatari</h3>
+      <ul id="signers-list" class="mt-3 space-y-1.5"></ul>
+      <div class="mt-2 flex gap-2">
+        <input id="add-signer-name" placeholder="Nome" maxlength="80" class="flex-1 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+        <input id="add-signer-email" type="email" placeholder="Email" maxlength="120" class="flex-1 rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+        <button type="button" id="add-signer-btn" class="rounded-md bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white">+</button>
+      </div>
+    </section>
+
+    <p id="form-err" class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+    <div class="flex items-center justify-end gap-2 border-t border-nx-gray-light/20 pt-5">
+      <a href={`/area-soci/verbali/${v.id}`} class="text-sm font-semibold text-nx-gray-dark no-underline hover:text-nx-cyan">Annulla</a>
+      <button type="submit" class="rounded-md bg-nx-cyan px-5 py-2.5 text-sm font-bold text-white shadow transition hover:-translate-y-0.5 hover:shadow-lg">
+        Salva modifiche
+      </button>
+    </div>
+  </form>
+
+  <script is:inline define:vars={{ bootstrapJson, defaultSignersJson, verbaleId: v.id }}>
+    const initial = JSON.parse(bootstrapJson);
+    const state = {
+      pool: [],   // popolato dopo fetch del pool atteso
+      extraPresent: [],
+      extraAbsent: [],
+      agendaItems: (initial.agendaItems || []).map((it) => ({
+        title: it.title || "", discussion: it.discussion || "", decision: it.decision || "",
+      })),
+      agendaMode: initial.agendaMarkdown ? "markdown" : "structured",
+      agendaMarkdown: initial.agendaMarkdown || "",
+      signers: (initial.signers && initial.signers.length > 0) ? initial.signers : JSON.parse(defaultSignersJson),
+    };
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    function nameKey(s) { return String(s || "").trim().toLowerCase(); }
+
+    // === Pre-fill campi intestazione ===
+    document.getElementById("f-type").value = initial.type;
+    document.getElementById("f-title").value = initial.title || "";
+    document.getElementById("f-title").dataset.userEdited = "1"; // così auto-title non sovrascrive
+    document.getElementById("f-date").value = initial.meetingDate || "";
+    document.getElementById("f-time").value = initial.meetingTime || "";
+    document.getElementById("f-end-time").value = initial.meetingEndTime || "";
+    document.getElementById("f-location").value = initial.location || "";
+    document.getElementById("f-president").value = initial.presidentName || "";
+    document.getElementById("f-secretary").value = initial.secretaryName || "";
+    document.getElementById("f-body-extra").value = initial.bodyExtra || "";
+
+    // === Pool fetch + reconstruct dei presenti/assenti dal verbale storico ===
+    let lastFetchedType = "";
+    async function fetchExpectedPool(type) {
+      if (!type || type === lastFetchedType) return;
+      lastFetchedType = type;
+      try {
+        const r = await fetch(`/api/verbali/expected-attendees?type=${encodeURIComponent(type)}`);
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+
+        // Mappa name → entry attendees storica per ricostruire isPresent/isJustified
+        const presentByName = {};
+        for (const a of (initial.attendeesPresent || [])) presentByName[nameKey(a.name)] = a;
+        const absentByName = {};
+        for (const a of (initial.attendeesAbsent || [])) absentByName[nameKey(a.name)] = a;
+
+        // Pool: per ogni atteso, match per nome
+        state.pool = j.attendees.map((a) => {
+          const key = nameKey(a.name);
+          const isPresent = !!presentByName[key];
+          const absentEntry = absentByName[key];
+          return {
+            id: a.id,
+            name: a.name,
+            role: a.board_role_label || null,
+            isPresent,
+            isJustified: !!absentEntry?.justified,
+          };
+        });
+
+        // Extras: attendees presenti/assenti NON matched col pool → vanno in extra
+        const poolNames = new Set(j.attendees.map((a) => nameKey(a.name)));
+        state.extraPresent = (initial.attendeesPresent || [])
+          .filter((a) => !poolNames.has(nameKey(a.name)))
+          .map((a) => ({ name: a.name, role: a.role || undefined }));
+        state.extraAbsent = (initial.attendeesAbsent || [])
+          .filter((a) => !poolNames.has(nameKey(a.name)))
+          .map((a) => ({ name: a.name, justified: !!a.justified }));
+
+        renderPool();
+        renderPresent();
+        renderAbsent();
+      } catch (e) {
+        document.getElementById("expected-hint").textContent = "Errore: " + e.message;
+      }
+    }
+    document.getElementById("f-type").addEventListener("change", (e) => {
+      // Reset extras quando si cambia tipo (per evitare contaminazioni)
+      // ma preservare lo stato corrente del pool
+      fetchExpectedPool(e.target.value);
+    });
+
+    function renderPool() {
+      const wrap = document.getElementById("expected-pool");
+      const hint = document.getElementById("expected-hint");
+      const list = document.getElementById("pool-list");
+      const count = document.getElementById("expected-count");
+      if (state.pool.length === 0) {
+        wrap.classList.add("hidden");
+        hint.textContent = "Nessun partecipante atteso per questo tipo.";
+        return;
+      }
+      wrap.classList.remove("hidden");
+      hint.textContent = "Spunta chi è presente. Chi resta non spuntato è assente.";
+      count.textContent = state.pool.length;
+      list.innerHTML = state.pool.map((p, i) => `
+        <li class="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+          <label class="flex flex-1 min-w-0 items-center gap-2 cursor-pointer">
+            <input type="checkbox" data-pool-present="${i}" ${p.isPresent ? "checked" : ""}
+              class="h-4 w-4 rounded text-nx-cyan focus:ring-nx-cyan" />
+            <span class="min-w-0 truncate">
+              <strong>${esc(p.name)}</strong>
+              ${p.role ? `<span class="text-xs text-nx-cyan"> · ${esc(p.role)}</span>` : ""}
+            </span>
+          </label>
+          <label class="flex items-center gap-1 text-[11px] text-nx-gray-dark" data-justified-wrap="${i}" style="${p.isPresent ? 'visibility:hidden;' : ''}">
+            <input type="checkbox" data-pool-justified="${i}" ${p.isJustified ? "checked" : ""}
+              class="h-3.5 w-3.5 rounded text-emerald-600 focus:ring-emerald-500" />
+            giustificato
+          </label>
+        </li>`).join("");
+    }
+    document.getElementById("pool-list").addEventListener("change", (e) => {
+      const t = e.target;
+      if (t.dataset.poolPresent != null) {
+        const i = Number(t.dataset.poolPresent);
+        state.pool[i].isPresent = t.checked;
+        if (t.checked) state.pool[i].isJustified = false;
+        const wrap = document.querySelector(`[data-justified-wrap="${i}"]`);
+        if (wrap) wrap.style.visibility = t.checked ? "hidden" : "";
+        renderPresent(); renderAbsent();
+      } else if (t.dataset.poolJustified != null) {
+        state.pool[Number(t.dataset.poolJustified)].isJustified = t.checked;
+        renderAbsent();
+      }
+    });
+    document.getElementById("check-all").addEventListener("click", () => {
+      state.pool.forEach((p) => { p.isPresent = true; p.isJustified = false; });
+      renderPool(); renderPresent(); renderAbsent();
+    });
+    document.getElementById("uncheck-all").addEventListener("click", () => {
+      state.pool.forEach((p) => { p.isPresent = false; });
+      renderPool(); renderPresent(); renderAbsent();
+    });
+
+    function computeAttendeesPresent() {
+      const fromPool = state.pool.filter((p) => p.isPresent).map((p) => ({ name: p.name, role: p.role || undefined }));
+      return [...fromPool, ...state.extraPresent];
+    }
+    function computeAttendeesAbsent() {
+      const fromPool = state.pool.filter((p) => !p.isPresent).map((p) => ({ name: p.name, role: p.role || undefined, justified: p.isJustified }));
+      return [...fromPool, ...state.extraAbsent];
+    }
+
+    function renderPresent() {
+      const all = computeAttendeesPresent();
+      document.getElementById("present-count").textContent = all.length;
+      const el = document.getElementById("present-list");
+      el.innerHTML = all.length === 0
+        ? `<li class="text-xs italic text-nx-gray-dark">Nessuno.</li>`
+        : all.map((a, i) => {
+            const poolPresentCount = state.pool.filter((p) => p.isPresent).length;
+            const isExtra = i >= poolPresentCount;
+            const extraIdx = isExtra ? i - poolPresentCount : -1;
+            return `<li class="flex items-center justify-between gap-2 rounded border border-nx-gray-light/20 px-3 py-1.5 text-sm">
+              <span>
+                <strong>${esc(a.name)}</strong>${a.role ? `<span class="text-xs text-nx-gray-dark"> · ${esc(a.role)}</span>` : ""}
+                ${isExtra ? `<span class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">Extra</span>` : ""}
+              </span>
+              ${isExtra ? `<button data-del-present-extra="${extraIdx}" class="text-xs text-red-500 hover:text-red-700">×</button>` : ""}
+            </li>`;
+          }).join("");
+    }
+    function renderAbsent() {
+      const all = computeAttendeesAbsent();
+      document.getElementById("absent-count").textContent = all.length;
+      const el = document.getElementById("absent-list");
+      el.innerHTML = all.length === 0
+        ? `<li class="text-xs italic text-nx-gray-dark">Nessuno.</li>`
+        : all.map((a, i) => {
+            const fromPoolCount = state.pool.filter((p) => !p.isPresent).length;
+            const isExtra = i >= fromPoolCount;
+            const extraIdx = isExtra ? i - fromPoolCount : -1;
+            return `<li class="flex items-center justify-between gap-2 rounded border border-nx-gray-light/20 px-3 py-1.5 text-sm">
+              <span>
+                <strong>${esc(a.name)}</strong>${a.role ? `<span class="text-xs text-nx-gray-dark"> · ${esc(a.role)}</span>` : ""}
+                ${a.justified ? `<span class="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">Giustificato</span>` : ""}
+                ${isExtra ? `<span class="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">Extra</span>` : ""}
+              </span>
+              ${isExtra ? `<button data-del-absent-extra="${extraIdx}" class="text-xs text-red-500 hover:text-red-700">×</button>` : ""}
+            </li>`;
+          }).join("");
+    }
+
+    document.getElementById("add-present-btn").addEventListener("click", () => {
+      const name = document.getElementById("add-present-name").value.trim();
+      const role = document.getElementById("add-present-role").value.trim() || undefined;
+      if (!name) return;
+      state.extraPresent.push({ name, role });
+      document.getElementById("add-present-name").value = "";
+      document.getElementById("add-present-role").value = "";
+      renderPresent();
+    });
+    document.getElementById("present-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delPresentExtra;
+      if (i == null) return;
+      state.extraPresent.splice(Number(i), 1);
+      renderPresent();
+    });
+    document.getElementById("add-absent-btn").addEventListener("click", () => {
+      const name = document.getElementById("add-absent-name").value.trim();
+      const justified = document.getElementById("add-absent-justified").checked;
+      if (!name) return;
+      state.extraAbsent.push({ name, justified });
+      document.getElementById("add-absent-name").value = "";
+      document.getElementById("add-absent-justified").checked = false;
+      renderAbsent();
+    });
+    document.getElementById("absent-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delAbsentExtra;
+      if (i == null) return;
+      state.extraAbsent.splice(Number(i), 1);
+      renderAbsent();
+    });
+
+    // === Agenda ===
+    function renderAgenda() {
+      const el = document.getElementById("agenda-list");
+      el.innerHTML = state.agendaItems.map((it, i) => `
+        <li class="rounded-lg border border-nx-gray-light/30 bg-nx-off-white p-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Punto ${i + 1}</p>
+            <button data-del-agenda="${i}" class="text-xs text-red-500 hover:text-red-700">Rimuovi</button>
+          </div>
+          <input data-agenda-title="${i}" placeholder="Titolo" value="${esc(it.title)}"
+            class="mt-2 w-full rounded-md border border-nx-gray-light/40 bg-white px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+          <textarea data-agenda-discussion="${i}" placeholder="Discussione (opzionale)" rows="2"
+            class="mt-2 w-full rounded-md border border-nx-gray-light/40 bg-white px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">${esc(it.discussion ?? "")}</textarea>
+          <textarea data-agenda-decision="${i}" placeholder="Decisione (opzionale)" rows="2"
+            class="mt-2 w-full rounded-md border border-nx-gray-light/40 bg-white px-3 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">${esc(it.decision ?? "")}</textarea>
+        </li>`).join("");
+    }
+    document.getElementById("add-agenda-btn").addEventListener("click", () => {
+      state.agendaItems.push({ title: "", discussion: "", decision: "" });
+      renderAgenda();
+    });
+    document.getElementById("agenda-list").addEventListener("input", (e) => {
+      const t = e.target;
+      if (t.dataset.agendaTitle != null) state.agendaItems[Number(t.dataset.agendaTitle)].title = t.value;
+      if (t.dataset.agendaDiscussion != null) state.agendaItems[Number(t.dataset.agendaDiscussion)].discussion = t.value;
+      if (t.dataset.agendaDecision != null) state.agendaItems[Number(t.dataset.agendaDecision)].decision = t.value;
+    });
+    document.getElementById("agenda-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delAgenda;
+      if (i == null) return;
+      state.agendaItems.splice(Number(i), 1);
+      renderAgenda();
+    });
+
+    // === Signers ===
+    function renderSigners() {
+      const el = document.getElementById("signers-list");
+      el.innerHTML = state.signers.map((s, i) => `
+        <li class="flex items-center justify-between gap-2 rounded border border-nx-gray-light/20 px-3 py-1.5 text-sm">
+          <span><strong>${esc(s.name)}</strong> <span class="text-xs text-nx-gray-dark">— ${esc(s.email)}</span></span>
+          <button data-del-signer="${i}" class="text-xs text-red-500 hover:text-red-700">×</button>
+        </li>`).join("");
+    }
+    document.getElementById("add-signer-btn").addEventListener("click", () => {
+      const name = document.getElementById("add-signer-name").value.trim();
+      const email = document.getElementById("add-signer-email").value.trim();
+      if (!name || !email) return;
+      state.signers.push({ name, email });
+      document.getElementById("add-signer-name").value = "";
+      document.getElementById("add-signer-email").value = "";
+      renderSigners();
+    });
+    document.getElementById("signers-list").addEventListener("click", (e) => {
+      const i = e.target?.dataset?.delSigner;
+      if (i == null) return;
+      state.signers.splice(Number(i), 1);
+      renderSigners();
+    });
+
+    // === Submit → PATCH ===
+    document.getElementById("verbale-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("form-err");
+      errEl.classList.add("hidden");
+      const fd = new FormData(e.target);
+      const payload = {
+        title: String(fd.get("title") || "").trim(),
+        meetingDate: String(fd.get("meetingDate") || ""),
+        meetingTime: String(fd.get("meetingTime") || "") || null,
+        meetingEndTime: String(fd.get("meetingEndTime") || "") || null,
+        location: String(fd.get("location") || "").trim() || null,
+        presidentName: String(fd.get("presidentName") || "").trim() || null,
+        secretaryName: String(fd.get("secretaryName") || "").trim() || null,
+        attendeesPresent: computeAttendeesPresent(),
+        attendeesAbsent: computeAttendeesAbsent(),
+        agendaItems: state.agendaMode === "structured"
+          ? state.agendaItems.filter((it) => (it.title || "").trim() !== "")
+          : [],
+        agendaMarkdown: state.agendaMode === "markdown"
+          ? (state.agendaMarkdown.trim() || null)
+          : null,
+        bodyExtra: String(fd.get("bodyExtra") || "").trim() || null,
+        signers: state.signers,
+      };
+      try {
+        const r = await fetch(`/api/verbali/${verbaleId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        window.location.href = `/area-soci/verbali/${verbaleId}`;
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove("hidden");
+      }
+    });
+
+    // === Toggle Strutturato / Markdown ===
+    const modeBtnS = document.getElementById("agenda-mode-structured");
+    const modeBtnM = document.getElementById("agenda-mode-markdown");
+    const structuredEl = document.getElementById("agenda-structured");
+    const markdownEl = document.getElementById("agenda-markdown-wrap");
+    const markdownTa = document.getElementById("agenda-markdown");
+    function structuredToMarkdown(items) {
+      return items.map((it, i) => {
+        const lines = [`### ${i + 1}. ${it.title || "Senza titolo"}`];
+        if (it.discussion) lines.push("", it.discussion);
+        if (it.decision) lines.push("", `**Decisione:** ${it.decision}`);
+        return lines.join("\n");
+      }).join("\n\n");
+    }
+    function setBtnActive(btn, isActive) {
+      btn.classList.toggle("bg-nx-cyan", isActive);
+      btn.classList.toggle("text-white", isActive);
+      btn.classList.toggle("text-nx-dark", !isActive);
+      btn.classList.toggle("hover:bg-nx-off-white", !isActive);
+    }
+    function applyAgendaMode() {
+      const isMd = state.agendaMode === "markdown";
+      setBtnActive(modeBtnS, !isMd);
+      setBtnActive(modeBtnM, isMd);
+      structuredEl.classList.toggle("hidden", isMd);
+      markdownEl.classList.toggle("hidden", !isMd);
+    }
+    modeBtnS.addEventListener("click", () => { state.agendaMode = "structured"; applyAgendaMode(); });
+    modeBtnM.addEventListener("click", () => {
+      const valid = state.agendaItems.filter((it) => (it.title || "").trim() !== "");
+      if (!markdownTa.value.trim() && valid.length > 0) {
+        markdownTa.value = structuredToMarkdown(valid);
+        state.agendaMarkdown = markdownTa.value;
+      }
+      state.agendaMode = "markdown";
+      applyAgendaMode();
+    });
+    markdownTa.addEventListener("input", () => { state.agendaMarkdown = markdownTa.value; });
+    // Pre-fill textarea con markdown salvato (se presente nel bootstrap)
+    if (state.agendaMarkdown) markdownTa.value = state.agendaMarkdown;
+    applyAgendaMode();
+
+    // === Init ===
+    renderAgenda();
+    renderSigners();
+    // Carica pool per il tipo corrente (e popola pool/extras dal bootstrap)
+    fetchExpectedPool(initial.type);
+  </script>
+</AreaSociLayout>

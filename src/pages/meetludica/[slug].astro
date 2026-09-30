@@ -1,0 +1,132 @@
+---
+/**
+ * Pagina di dettaglio di un articolo MeetLudica.
+ * Mostra: header (titolo, relatore, data, tag), abstract, articolo formattato
+ * (body markdown -> HTML), transcript integrale collassabile, download PDF
+ * brandizzato, link registrazione.
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getDb, getEnv } from "../../server/db";
+import { getArticleBySlugAnyStatus } from "../../server/articles";
+import { getUser } from "../../server/guards";
+import { canManageMeetludica } from "../../server/permissions";
+import { renderArticleHtml } from "../../server/article-markdown";
+
+export const prerender = false;
+
+const { slug } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db || !slug) return new Response("Not found", { status: 404 });
+
+const article = await getArticleBySlugAnyStatus(db, slug);
+if (!article) return new Response("Articolo non trovato", { status: 404 });
+
+// Le bozze sono visibili solo a chi gestisce MeetLudica, con avviso in pagina.
+const isDraft = article.status !== "published";
+// Anteprima di una bozza: la vede chi gestisce MeetLudica oppure chi possiede il
+// link di modifica, passando il token come ?preview= (serve all'autore, che non
+// ha un account).
+const previewToken = Astro.url.searchParams.get("preview");
+const hasValidToken =
+  !!previewToken && !!article.editToken && previewToken === article.editToken;
+if (isDraft) {
+  const viewer = await getUser(Astro);
+  if (!hasValidToken && !canManageMeetludica(viewer)) {
+    return new Response("Articolo non trovato", { status: 404 });
+  }
+}
+
+const bodyHtml = article.body ? renderArticleHtml(article.body) : null;
+const dateLabel = new Date(article.meetingDate).toLocaleDateString("it-IT", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+---
+
+<BaseLayout title={`${article.title} — MeetLudica`} description={article.abstract.slice(0, 160)} noindex={isDraft}>
+  <article class="mx-auto max-w-3xl px-4 pb-24 pt-28 lg:pt-32">
+    {isDraft && (
+      <div class="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <strong>Anteprima di una bozza.</strong> Questo articolo non è ancora pubblicato: lo vedi
+        perché gestisci MeetLudica. Non è raggiungibile dall'archivio pubblico.
+      </div>
+    )}
+    <!-- Breadcrumb -->
+    <p class="text-sm">
+      <a href="/meetludica" class="font-semibold uppercase tracking-[0.2em] text-nx-cyan no-underline hover:underline">
+        ← MeetLudica
+      </a>
+    </p>
+
+    <!-- Header -->
+    <header class="mt-6 border-b border-nx-gray-light/30 pb-6">
+      <h1 class="text-3xl font-black leading-tight tracking-tight text-nx-dark sm:text-4xl">
+        {article.title}
+      </h1>
+      <p class="mt-3 text-base text-nx-gray-dark">
+        <strong class="text-nx-dark">{article.speaker}</strong> · {dateLabel}
+      </p>
+      <p class="mt-0.5 text-xs text-nx-gray-dark">Resoconto a cura di {article.editor || article.authorName}</p>
+      {article.tags.length > 0 && (
+        <div class="mt-3 flex flex-wrap gap-2">
+          {article.tags.map((t) => (
+            <span class="rounded-full bg-nx-cyan-light px-3 py-1 text-xs font-medium text-nx-cyan">{t}</span>
+          ))}
+        </div>
+      )}
+      <div class="mt-5 flex flex-wrap gap-3">
+        {article.body && (
+          <a
+            href={`/api/meetludica/articles/${article.slug}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg bg-nx-cyan px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-white no-underline shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue"
+          >
+            ↓ Scarica PDF
+          </a>
+        )}
+        {article.videoUrl && (
+          <a
+            href={article.videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-lg border border-nx-gray-light/40 px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-nx-dark no-underline transition hover:border-nx-cyan hover:text-nx-cyan"
+          >
+            🔗 Progetto / contenuti
+          </a>
+        )}
+      </div>
+    </header>
+
+    <!-- Abstract -->
+    <section class="mt-8">
+      <h2 class="text-xl font-bold text-nx-dark">Abstract</h2>
+      <p class="mt-2 whitespace-pre-line leading-relaxed text-nx-gray-dark">{article.abstract}</p>
+    </section>
+
+    <!-- Corpo articolo -->
+    {bodyHtml && (
+      <section class="mt-4" set:html={bodyHtml} />
+    )}
+
+    <!-- Transcript collassabile -->
+    {article.transcript && (
+      <details class="mt-12 rounded-xl border border-nx-gray-light/30 bg-nx-off-white">
+        <summary class="cursor-pointer px-6 py-4 text-sm font-bold uppercase tracking-wider text-nx-cyan">
+          Transcript completo della presentazione
+        </summary>
+        <div class="border-t border-nx-gray-light/20 px-6 py-5">
+          <p class="mb-3 text-xs text-nx-gray-dark">
+            Trascrizione integrale della registrazione, corretta editorialmente.
+            Eventuali imprecisioni sono possibili.
+          </p>
+          <div class="max-h-[600px] overflow-y-auto whitespace-pre-line text-sm leading-relaxed text-nx-dark">
+            {article.transcript}
+          </div>
+        </div>
+      </details>
+    )}
+  </article>
+</BaseLayout>

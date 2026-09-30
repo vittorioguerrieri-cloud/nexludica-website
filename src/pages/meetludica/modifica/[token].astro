@@ -1,0 +1,291 @@
+---
+/**
+ * Editor pubblico di un articolo MeetLudica, accessibile dall'autore tramite
+ * link segreto (edit_token). NON richiede login né essere soci: il possesso
+ * del link è l'autorizzazione. Le modifiche aggiornano sia la pagina pubblica
+ * sia il PDF brandizzato (generato dallo stesso markdown).
+ */
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getArticleByEditToken } from "../../../server/articles";
+
+export const prerender = false;
+
+const { token } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+const article = (db && token) ? await getArticleByEditToken(db, token) : null;
+---
+
+<BaseLayout title="Modifica articolo — MeetLudica" description="Editor articolo MeetLudica">
+  {!article ? (
+    <section class="mx-auto max-w-2xl px-4 pb-24 pt-32 text-center">
+      <h1 class="text-2xl font-black text-nx-dark">Link non valido</h1>
+      <p class="mt-3 text-nx-gray-dark">
+        Questo link di modifica non è valido o l'articolo è stato rimosso.
+        Contatta NexLudica all'indirizzo
+        <a href="mailto:info@nexludica.org" class="text-nx-cyan no-underline hover:underline">info@nexludica.org</a>.
+      </p>
+    </section>
+  ) : (
+    <section class="mx-auto max-w-5xl px-4 pb-32 pt-28 lg:pt-32">
+      <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-4">
+        <h1 class="text-2xl font-black text-nx-dark">Modifica il tuo articolo</h1>
+        <p class="mt-1 text-sm text-nx-gray-dark">
+          Stai modificando <strong>{article.title}</strong> come autore. Le modifiche
+          aggiornano la pagina pubblica e il PDF scaricabile. Non serve un account:
+          questo link è personale, non condividerlo.
+        </p>
+        <p class="mt-2 text-xs text-nx-gray-dark">
+          Stato attuale: <strong>{article.status === "published" ? "pubblicato (visibile a tutti)" : article.status === "draft" ? "bozza privata (visibile solo da questo link)" : article.status}</strong>
+          {article.status === "published" && (
+            <>
+              {" · "}
+              <a href={`/meetludica/${article.slug}`} target="_blank" class="text-nx-cyan no-underline hover:underline">vedi pagina</a>
+              {" · "}
+              <a href={`/api/meetludica/articles/${article.slug}/pdf`} target="_blank" class="text-nx-cyan no-underline hover:underline">vedi PDF</a>
+            </>
+          )}
+        </p>
+      </div>
+
+      <form id="edit-form" class="mt-6 space-y-5">
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="block text-sm sm:col-span-2">
+            <span class="font-semibold text-nx-dark">Titolo</span>
+            <input name="title" required maxlength="200" value={article.title} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+          </label>
+          <label class="block text-sm">
+            <span class="font-semibold text-nx-dark">Relatore</span>
+            <input name="speaker" required maxlength="200" value={article.speaker} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+          </label>
+          <label class="block text-sm">
+            <span class="font-semibold text-nx-dark">A cura di <span class="font-normal text-nx-gray-dark">(chi ha scritto il resoconto)</span></span>
+            <input name="editor" maxlength="200" value={article.editor ?? ""} placeholder="Nome di chi ha curato l'articolo" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+          </label>
+          <label class="block text-sm">
+            <span class="font-semibold text-nx-dark">Data (incontro)</span>
+            <input name="meetingDate" type="date" value={article.meetingDate} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+          </label>
+          <label class="block text-sm">
+            <span class="font-semibold text-nx-dark">Tag (separati da virgola)</span>
+            <input name="tags" maxlength="300" value={article.tags.join(", ")} class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+          </label>
+          <label class="block text-sm">
+            <span class="font-semibold text-nx-dark">Link progetto o altri contenuti (opzionale)</span>
+            <input name="videoUrl" type="url" maxlength="500" value={article.videoUrl ?? ""} placeholder="https://..." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+          </label>
+        </div>
+
+        <label class="block text-sm">
+          <span class="font-semibold text-nx-dark">Abstract</span>
+          <textarea name="abstract" rows="4" maxlength="5000" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">{article.abstract}</textarea>
+        </label>
+
+        <div>
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <span class="text-sm font-semibold text-nx-dark">Corpo dell'articolo (markdown)</span>
+            <span class="text-xs text-nx-gray-dark">
+              <code>## Titolo</code>, <code>**grassetto**</code>, <code>*corsivo*</code>, <code>- elenco</code>, <code>&gt; citazione</code>, <code>[testo](url)</code>, <code>![didascalia](url)</code>
+            </span>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-nx-gray-light/30 bg-nx-off-white px-3 py-2">
+            <input type="file" id="img-file" accept="image/jpeg,image/png"
+              class="block max-w-[16rem] text-xs text-nx-dark file:mr-2 file:rounded file:border-0 file:bg-nx-cyan file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:uppercase file:tracking-wider file:text-white" />
+            <button type="button" id="img-upload"
+              class="rounded border border-nx-gray-light/50 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan disabled:opacity-50">
+              Carica e inserisci
+            </button>
+            <span class="text-[11px] text-nx-gray-dark">JPG o PNG, max 5&nbsp;MB. L'immagine viene inserita nel punto in cui hai il cursore.</span>
+            <span id="img-status" class="text-[11px]"></span>
+          </div>
+          <div class="mt-1 grid gap-3 lg:grid-cols-2">
+            <textarea id="body-input" name="body" rows="24" maxlength="100000" class="block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 font-mono text-xs leading-relaxed">{article.body ?? ""}</textarea>
+            <div class="rounded-lg border border-nx-gray-light/30 bg-white p-4">
+              <p class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-nx-gray-dark">Anteprima</p>
+              <div id="body-preview" class="text-sm"></div>
+            </div>
+          </div>
+        </div>
+
+        <details class="rounded-lg border border-nx-gray-light/30 bg-white">
+          <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-nx-dark">Transcript completo (opzionale)</summary>
+          <div class="border-t border-nx-gray-light/20 px-4 py-3">
+            <textarea name="transcript" rows="12" maxlength="200000" class="block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 font-mono text-xs">{article.transcript ?? ""}</textarea>
+          </div>
+        </details>
+      </form>
+
+      <!-- Barra salvataggio sticky -->
+      <div class="sticky bottom-0 z-10 mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-nx-gray-light/30 bg-white/95 p-4 shadow-lg backdrop-blur">
+        <button id="save-draft-btn" type="button" class="rounded-lg border border-nx-gray-light/50 bg-white px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-nx-dark shadow-sm transition hover:border-nx-cyan hover:text-nx-cyan disabled:opacity-50">
+          Salva bozza
+        </button>
+        <button id="publish-btn" type="button" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50">
+          {article.status === "published" ? "Salva (resta pubblico)" : "Pubblica"}
+        </button>
+        <a
+          id="preview-full"
+          href={`/meetludica/${article.slug}?preview=${article.editToken}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="rounded-lg border border-nx-gray-light/50 bg-white px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-nx-dark no-underline shadow-sm transition hover:border-nx-cyan hover:text-nx-cyan"
+        >
+          Anteprima completa ↗
+        </a>
+        <span id="save-status" class="text-sm"></span>
+      </div>
+      <p class="mt-2 text-xs text-nx-gray-dark">
+        <strong>Anteprima completa</strong>: apre l'articolo come apparirà online, in una
+        scheda nuova. Mostra l'ultima versione <em>salvata</em>, quindi salva prima di aprirla.
+        <strong>Salva bozza</strong>: salva e tiene l'articolo privato (visibile solo da questo link).
+        <strong>Pubblica</strong>: lo rende visibile nell'archivio pubblico. Puoi sempre riportarlo a bozza in seguito.
+      </p>
+    </section>
+  )}
+</BaseLayout>
+
+{article && (
+  <script is:inline define:vars={{ token: article.editToken }}>
+    (function () {
+      const form = document.getElementById("edit-form");
+      const bodyInput = document.getElementById("body-input");
+      const preview = document.getElementById("body-preview");
+      const statusEl = document.getElementById("save-status");
+      const api = "/api/meetludica/articles/edit/" + encodeURIComponent(token);
+
+      // --- Anteprima live (debounced) ---
+      let t = null;
+      async function refreshPreview() {
+        try {
+          const res = await fetch(api, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "preview", body: bodyInput.value }),
+          });
+          const data = await res.json();
+          if (data.ok) preview.innerHTML = data.html || "<p class='text-nx-gray-dark italic'>(vuoto)</p>";
+        } catch (e) { /* ignore */ }
+      }
+      bodyInput.addEventListener("input", () => {
+        clearTimeout(t);
+        t = setTimeout(refreshPreview, 500);
+      });
+      refreshPreview();
+
+      // --- Caricamento immagini ---
+      const imgFile = document.getElementById("img-file");
+      const imgBtn = document.getElementById("img-upload");
+      const imgStatus = document.getElementById("img-status");
+
+      function insertAtCursor(text) {
+        const start = bodyInput.selectionStart ?? bodyInput.value.length;
+        const end = bodyInput.selectionEnd ?? start;
+        const before = bodyInput.value.slice(0, start);
+        const after = bodyInput.value.slice(end);
+        // L'immagine deve stare su una riga propria per essere riconosciuta.
+        const NL = String.fromCharCode(10);
+        const pre = !before ? "" : before.endsWith(NL + NL) ? "" : before.endsWith(NL) ? NL : NL + NL;
+        const post = !after ? "" : after.startsWith(NL + NL) ? "" : after.startsWith(NL) ? NL : NL + NL;
+        bodyInput.value = before + pre + text + post + after;
+        const pos = (before + pre + text).length;
+        bodyInput.focus();
+        bodyInput.setSelectionRange(pos, pos);
+        bodyInput.dispatchEvent(new Event("input"));
+      }
+
+      imgBtn?.addEventListener("click", async () => {
+        const f = imgFile && imgFile.files && imgFile.files[0];
+        if (!f) {
+          imgStatus.textContent = "Scegli un file";
+          imgStatus.className = "text-[11px] text-red-600";
+          return;
+        }
+        imgBtn.disabled = true;
+        imgStatus.textContent = "Caricamento…";
+        imgStatus.className = "text-[11px] text-nx-gray-dark";
+        try {
+          const fd2 = new FormData();
+          fd2.append("file", f);
+          const res = await fetch(api + "/image", { method: "POST", body: fd2 });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            imgStatus.textContent = "✗ " + (data.error || res.status);
+            imgStatus.className = "text-[11px] text-red-600";
+            imgBtn.disabled = false;
+            return;
+          }
+          insertAtCursor("![Didascalia dell'immagine](" + data.url + ")");
+          imgStatus.textContent = "✓ inserita — sostituisci la didascalia";
+          imgStatus.className = "text-[11px] font-semibold text-emerald-600";
+          imgFile.value = "";
+          imgBtn.disabled = false;
+        } catch (e) {
+          imgStatus.textContent = "Errore di rete";
+          imgStatus.className = "text-[11px] text-red-600";
+          imgBtn.disabled = false;
+        }
+      });
+
+      // --- Salvataggio (status = "draft" | "published") ---
+      const saveDraftBtn = document.getElementById("save-draft-btn");
+      const publishBtn = document.getElementById("publish-btn");
+
+      async function save(status) {
+        const fd = new FormData(form);
+        const payload = {
+          action: "save",
+          status: status,
+          title: fd.get("title"),
+          speaker: fd.get("speaker"),
+          editor: fd.get("editor"),
+          meetingDate: fd.get("meetingDate"),
+          abstract: fd.get("abstract"),
+          body: fd.get("body"),
+          transcript: fd.get("transcript"),
+          tags: fd.get("tags"),
+          videoUrl: fd.get("videoUrl"),
+        };
+        if (!payload.title || !payload.speaker) {
+          statusEl.textContent = "Titolo e relatore sono obbligatori";
+          statusEl.className = "text-sm text-red-600";
+          return;
+        }
+        if (status === "published" && !confirm("Pubblicare l'articolo? Sarà visibile nell'archivio pubblico di MeetLudica.")) return;
+        saveDraftBtn.disabled = true;
+        publishBtn.disabled = true;
+        statusEl.textContent = status === "published" ? "Pubblicazione…" : "Salvataggio…";
+        statusEl.className = "text-sm text-nx-gray-dark";
+        try {
+          const res = await fetch(api, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            statusEl.textContent = "✗ " + (data.error || res.status);
+            statusEl.className = "text-sm text-red-600";
+            saveDraftBtn.disabled = false; publishBtn.disabled = false;
+            return;
+          }
+          if (data.status === "published") {
+            statusEl.innerHTML = "✓ Pubblicato · <a class=\"text-nx-cyan underline\" target=\"_blank\" href=\"/meetludica/" + data.slug + "\">vedi pagina</a> · <a class=\"text-nx-cyan underline\" target=\"_blank\" href=\"/api/meetludica/articles/" + data.slug + "/pdf\">PDF</a>";
+            publishBtn.textContent = "Salva (resta pubblico)";
+          } else {
+            statusEl.textContent = "✓ Bozza salvata (privata)";
+            publishBtn.textContent = "Pubblica";
+          }
+          statusEl.className = "text-sm font-semibold text-emerald-600";
+          saveDraftBtn.disabled = false; publishBtn.disabled = false;
+        } catch (e) {
+          statusEl.textContent = "Errore di rete";
+          statusEl.className = "text-sm text-red-600";
+          saveDraftBtn.disabled = false; publishBtn.disabled = false;
+        }
+      }
+      saveDraftBtn.addEventListener("click", () => save("draft"));
+      publishBtn.addEventListener("click", () => save("published"));
+    })();
+  </script>
+)}

@@ -1,0 +1,1574 @@
+---
+/**
+ * Admin tab MeetLudica:
+ *  - Mailing list (lista iscritti, bulk add, broadcast email, storico broadcast)
+ *  - Proposte talk (lista pending/accepted/etc, change status)
+ *
+ * Solo admin (role check via guards).
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import {
+  listSubscribers,
+  listProposals,
+  listBroadcasts,
+  listAllBroadcastProblems,
+  listEvents,
+  getDeliveryHealth,
+  getSubscriberHealth,
+} from "../../../server/meetludica";
+import { listAllArticles } from "../../../server/articles";
+import { STAFF_CC } from "../../../server/email";
+import { canManageMeetludica } from "../../../server/permissions";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (!canManageMeetludica(user)) return Astro.redirect("/area-soci");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+const subscribers = db ? await listSubscribers(db) : [];
+const proposals = db ? await listProposals(db) : [];
+const broadcasts = db ? await listBroadcasts(db) : [];
+const broadcastProblems = db ? await listAllBroadcastProblems(db) : [];
+const problemsByBroadcast = new Map<string, typeof broadcastProblems>();
+for (const p of broadcastProblems) {
+  const arr = problemsByBroadcast.get(p.broadcastId) ?? [];
+  arr.push(p);
+  problemsByBroadcast.set(p.broadcastId, arr);
+}
+const events = db ? await listEvents(db) : [];
+const health = db ? await getDeliveryHealth(db) : null;
+const subHealth = db ? await getSubscriberHealth(db) : [];
+const problemi = subHealth.filter((s) => s.salute === "problema");
+function fmtEvent(ts: number | null) {
+  if (!ts) return "mai";
+  return new Date(ts).toLocaleString("it-IT", { timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+const statoLabel: Record<string, string> = {
+  delivered: "consegnata", bounced: "rimbalzata", complained: "segnalata spam",
+  failed: "fallita", sent: "in attesa", delivery_delayed: "in ritardo",
+};
+const eventsById = new Map(events.map((e) => [e.id, e]));
+// Per i dropdown di assegnazione: ordine cronologico crescente (la serata più
+// vicina nel tempo in cima, le successive a scendere). Piu' intuitivo.
+const eventsForSelect = [...events].sort((a, b) => a.eventDate - b.eventDate);
+const allArticles = db ? await listAllArticles(db) : [];
+const siteBase = ((env as Env).SITE_URL ?? "https://nexludica.org").replace(/\/$/, "");
+
+// Indirizzo "From" che verra' usato per i prossimi invii email (broadcast +
+// outreach), determinato dall'utente loggato se ha email @nexludica.org.
+// Solo display: la logica vera e' in server/email.ts senderFor().
+const fromAddress =
+  user.email && /@nexludica\.org$/i.test(user.email)
+    ? user.email
+    : (env as Env).FROM_EMAIL ?? "meetludica@nexludica.org";
+const fromDisplay = `${user.name || "NexLudica APS"} <${fromAddress}>`;
+
+// Tutti gli orari sono mostrati in ora italiana (Europe/Rome).
+const TZ = "Europe/Rome";
+
+function fmtDate(ts: number) {
+  return new Date(ts).toLocaleString("it-IT", {
+    timeZone: TZ,
+    day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function fmtEventDate(ts: number) {
+  return new Date(ts).toLocaleString("it-IT", {
+    timeZone: TZ,
+    day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function fmtEventShort(ts: number) {
+  return new Date(ts).toLocaleString("it-IT", {
+    timeZone: TZ,
+    day: "2-digit", month: "2-digit", year: "2-digit",
+  });
+}
+
+/** Timestamp ms → "YYYY-MM-DDTHH:mm" in ora italiana, per <input datetime-local>. */
+function toDatetimeLocal(ts: number): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  }).formatToParts(new Date(ts)).reduce((a: Record<string, string>, p) => {
+    a[p.type] = p.value;
+    return a;
+  }, {});
+  const hh = parts.hour === "24" ? "00" : parts.hour;
+  return `${parts.year}-${parts.month}-${parts.day}T${hh}:${parts.minute}`;
+}
+
+const availLabels: Record<string, { label: string; cls: string }> = {
+  none:      { label: "Non contattato", cls: "bg-nx-gray-light/20 text-nx-gray-dark" },
+  asked:     { label: "Contattato",      cls: "bg-amber-100 text-amber-800" },
+  confirmed: { label: "Disponibile",     cls: "bg-emerald-100 text-emerald-800" },
+  declined:  { label: "Non disponibile", cls: "bg-red-100 text-red-800" },
+};
+---
+
+<AreaSociLayout title="MeetLudica — Amministrazione" active="meetludica">
+  <div>
+    <h2 class="text-2xl font-bold text-nx-dark">MeetLudica</h2>
+    <p class="mt-1 text-sm text-nx-gray-dark">
+      Mailing list, proposte di talk e broadcast email. Visibile solo agli admin.
+    </p>
+  </div>
+
+  <!-- Tab switcher -->
+  <div class="mt-6 flex flex-wrap gap-1 border-b border-nx-gray-light/30">
+    <button type="button" data-tab="list" class="nx-tab nx-tab-active rounded-t-md border-b-2 border-nx-cyan px-4 py-2 text-sm font-semibold text-nx-cyan">
+      Mailing list <span class="ml-1 text-xs text-nx-gray-dark">({subscribers.length})</span>
+    </button>
+    <button type="button" data-tab="proposals" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">
+      Proposte talk <span class="ml-1 text-xs">({proposals.length})</span>
+    </button>
+    <button type="button" data-tab="events" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">
+      Serate <span class="ml-1 text-xs">({events.length})</span>
+    </button>
+    <button type="button" data-tab="articles" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">
+      Articoli <span class="ml-1 text-xs">({allArticles.length})</span>
+    </button>
+    <button type="button" data-tab="broadcasts" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">
+      Storico broadcast <span class="ml-1 text-xs">({broadcasts.length})</span>
+    </button>
+    <button type="button" data-tab="monitoraggio" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">
+      Recapito
+      {problemi.length > 0 && <span class="ml-1 rounded-full bg-red-100 px-1.5 text-[10px] font-bold text-red-700">{problemi.length}</span>}
+    </button>
+  </div>
+
+  <!-- ====================== TAB MAILING LIST ====================== -->
+  <section data-panel="list" class="nx-panel mt-6 space-y-8">
+    <!-- Compose broadcast -->
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Invia broadcast alla mailing list</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        L'email arrivera' a tutti gli iscritti via BCC. Markdown standard supportato:
+        <code class="rounded bg-white px-1 font-mono">**grassetto**</code>,
+        <code class="rounded bg-white px-1 font-mono">*corsivo*</code>,
+        <code class="rounded bg-white px-1 font-mono"># Titolo</code>,
+        <code class="rounded bg-white px-1 font-mono">- elenco</code>,
+        <code class="rounded bg-white px-1 font-mono">&gt; citazione</code>,
+        <code class="rounded bg-white px-1 font-mono">[testo](url)</code>.
+      </p>
+      <details class="mt-2 text-xs text-nx-gray-dark">
+        <summary class="cursor-pointer font-semibold text-nx-blue">Riquadro speaker (foto + abstract)</summary>
+        <p class="mt-2">
+          Sintassi: apri con <code class="rounded bg-white px-1 font-mono">:::speaker photo="https://..."</code>,
+          poi scrivi il contenuto (nome, titolo talk, abstract) usando markdown,
+          chiudi con <code class="rounded bg-white px-1 font-mono">:::</code>. La foto va su HTTPS.
+          Usa il pulsante "Riquadro speaker" qui sotto per inserire il template.
+        </p>
+      </details>
+      <form id="broadcast-form" class="mt-4 space-y-3">
+        <div class="rounded-md bg-white/60 px-3 py-2 text-[11px] text-nx-gray-dark">
+          <span class="font-semibold uppercase tracking-wider text-nx-blue">Inviato da:</span>
+          <code class="ml-1 font-mono">{fromDisplay}</code>
+          {!/@nexludica\.org$/i.test(user.email) && (
+            <span class="ml-2 text-amber-700">⚠ La tua email profilo non e' @nexludica.org → uso fallback. Per inviare a nome tuo, aggiorna l'email del profilo.</span>
+          )}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Oggetto</label>
+          <input name="subject" required maxlength="200" placeholder="es. Prossimo MeetLudica — giovedi' 28 gennaio" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Corpo email</label>
+          <!-- Toolbar di inserimento rapido -->
+          <div class="mt-1 mb-1 flex flex-wrap gap-1">
+            <button type="button" data-md-insert="bold" title="Grassetto" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs font-bold hover:bg-nx-cyan-light/40">B</button>
+            <button type="button" data-md-insert="italic" title="Corsivo" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs italic hover:bg-nx-cyan-light/40">I</button>
+            <button type="button" data-md-insert="h2" title="Titolo" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs font-bold hover:bg-nx-cyan-light/40">H</button>
+            <button type="button" data-md-insert="ul" title="Elenco" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs hover:bg-nx-cyan-light/40">• Lista</button>
+            <button type="button" data-md-insert="link" title="Link" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs hover:bg-nx-cyan-light/40">🔗 Link</button>
+            <button type="button" data-md-insert="quote" title="Citazione" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs hover:bg-nx-cyan-light/40">❝ Quote</button>
+            <button type="button" data-md-insert="hr" title="Linea orizzontale" class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs hover:bg-nx-cyan-light/40">— HR</button>
+            <button type="button" data-md-insert="speaker" title="Riquadro speaker vuoto" class="rounded border border-nx-cyan bg-nx-cyan/10 px-2 py-1 text-xs font-semibold text-nx-cyan hover:bg-nx-cyan/20">▢ Riquadro speaker</button>
+            <button type="button" id="upload-speaker-photo-btn" title="Carica foto speaker e inserisci riquadro" class="rounded border border-nx-cyan bg-nx-cyan/10 px-2 py-1 text-xs font-semibold text-nx-cyan hover:bg-nx-cyan/20">📷 Carica foto</button>
+            <input type="file" id="speaker-photo-file" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" />
+            <span id="upload-speaker-photo-status" class="self-center text-[11px]"></span>
+          </div>
+          <textarea name="body" id="broadcast-body" required rows="14" maxlength="20000" placeholder={"Ciao,\n\nVi aspettiamo al prossimo MeetLudica giovedi' 28 gennaio alle 19:00.\n\n## I talk della serata\n\n:::speaker photo=\"https://nexludica.org/path/to/foto.jpg\"\n**Nome Speaker** — *Titolo del talk*\n\nAbstract della presentazione...\n:::\n\nLink Meet: https://meet.google.com/...\n\nA presto!"} class="block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 font-mono text-xs"></textarea>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 pt-2">
+          <button type="button" id="broadcast-preview-btn" class="rounded-lg border border-nx-cyan/40 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light/30">
+            Anteprima
+          </button>
+          <button type="submit" id="broadcast-send-btn" class="rounded-lg bg-nx-cyan px-6 py-2 text-sm font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">
+            Invia a {subscribers.length} iscritt{subscribers.length === 1 ? "ə" : "ə"}
+          </button>
+          <span id="broadcast-status" class="text-xs"></span>
+        </div>
+      </form>
+      <div id="broadcast-preview" class="mt-4 hidden rounded-lg border border-nx-gray-light/30 bg-white p-4 text-sm">
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark">Anteprima (cosi' apparira' nell'email)</p>
+        <div id="broadcast-preview-content"></div>
+      </div>
+    </div>
+
+    <!-- Bulk add -->
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white p-6">
+      <h3 class="text-base font-bold text-nx-dark">Aggiungi iscritti in blocco</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Una email per riga. Accettati anche formati <code class="rounded bg-nx-off-white px-1 font-mono">Nome &lt;email&gt;</code> e <code class="rounded bg-nx-off-white px-1 font-mono">Nome, email</code>. Email duplicate vengono saltate automaticamente.
+      </p>
+      <form id="bulk-form" class="mt-3 space-y-3">
+        <textarea name="emails" rows="6" maxlength="50000" placeholder={"mario.rossi@example.com\nLucia Bianchi <lucia@example.com>\nGiulia Verdi, giulia@example.com"} class="block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 font-mono text-xs"></textarea>
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="submit" id="bulk-submit" class="rounded-lg bg-nx-dark px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue-deep disabled:opacity-50">
+            Aggiungi
+          </button>
+          <span id="bulk-status" class="text-xs"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- Lista iscritti -->
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-nx-gray-light/20 px-6 py-4">
+        <h3 class="text-base font-bold text-nx-dark">Iscritti ({subscribers.length})</h3>
+        <a id="export-csv" href="#" class="text-xs font-semibold text-nx-cyan no-underline hover:underline">
+          Esporta CSV ↓
+        </a>
+      </div>
+      {subscribers.length === 0 ? (
+        <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessun iscritto ancora.</p>
+      ) : (
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+              <tr>
+                <th class="px-4 py-3 text-left">Nome</th>
+                <th class="px-4 py-3 text-left">Email</th>
+                <th class="px-4 py-3 text-left">Note</th>
+                <th class="px-4 py-3 text-left">Iscrizione</th>
+                <th class="px-4 py-3 text-right">Azioni</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-nx-gray-light/20">
+              {subscribers.map((s) => (
+                <tr data-sub-row data-sub-id={s.id}>
+                  <td class="px-4 py-3 font-medium text-nx-dark">{s.name}</td>
+                  <td class="px-4 py-3 text-nx-gray-dark"><a href={`mailto:${s.email}`} class="no-underline hover:underline">{s.email}</a></td>
+                  <td class="px-4 py-3 text-xs text-nx-gray-dark max-w-xs">{s.motivation ? <span class="line-clamp-2">{s.motivation}</span> : "—"}</td>
+                  <td class="px-4 py-3 text-xs text-nx-gray-dark">{fmtDate(s.createdAt)}</td>
+                  <td class="px-4 py-3 text-right">
+                    <button type="button" data-delete-sub={s.id} class="text-xs text-nx-gray-dark hover:text-red-600">Elimina</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- ====================== TAB PROPOSALS ====================== -->
+  <section data-panel="proposals" class="nx-panel mt-6 hidden space-y-4">
+    {proposals.length > 0 && (
+      <div class="rounded-lg border border-nx-cyan/30 bg-nx-cyan-light/20 px-4 py-3 text-xs text-nx-gray-dark">
+        <strong class="text-nx-dark">Come si usa:</strong> i menu <em>Stato</em>, <em>Serata</em> e <em>Disponibilità</em> si salvano da soli al cambio (vedi "✓ salvato"), non serve ricaricare.
+        Il pulsante <strong>Contatta per disponibilità</strong> apre un'email già pronta per il relatore: se hai assegnato una serata il testo cita data e luogo, altrimenti è una richiesta generica. All'invio lo stato passa a "Contattato" e l'email resta nello storico.
+      </div>
+    )}
+    {proposals.length === 0 ? (
+      <p class="rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
+        Nessuna proposta di talk ricevuta.
+      </p>
+    ) : (
+      proposals.map((p) => {
+        const assigned = p.eventId ? eventsById.get(p.eventId) : null;
+        const avail = availLabels[p.availabilityStatus] ?? availLabels.none;
+        const linkedArticle = p.articleId ? allArticles.find((a) => a.id === p.articleId) : null;
+        return (
+          <article class="rounded-xl border border-nx-gray-light/30 bg-white p-5" data-prop-row data-prop-id={p.id}>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-base font-bold text-nx-dark">{p.talkTitle || "(senza titolo)"}</p>
+                <p class="mt-0.5 text-xs text-nx-gray-dark">
+                  {p.name} · <a href={`mailto:${p.email}`} class="text-nx-cyan no-underline hover:underline">{p.email}</a> · {fmtDate(p.createdAt)}
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span data-prop-status-badge={p.id} class={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${
+                  p.status === "pending" ? "bg-amber-100 text-amber-800"
+                  : p.status === "accepted" ? "bg-emerald-100 text-emerald-800"
+                  : p.status === "rejected" ? "bg-red-100 text-red-800"
+                  : "bg-nx-gray-light/30 text-nx-gray-dark"
+                }`}>
+                  {p.status}
+                </span>
+                <select data-prop-status data-id={p.id} class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs">
+                  <option value="pending"   selected={p.status === "pending"}>pending</option>
+                  <option value="accepted"  selected={p.status === "accepted"}>accepted</option>
+                  <option value="rejected"  selected={p.status === "rejected"}>rejected</option>
+                  <option value="archived"  selected={p.status === "archived"}>archived</option>
+                </select>
+                <span data-prop-saved={p.id} class="hidden text-[10px] font-semibold text-emerald-600">✓ salvato</span>
+              </div>
+            </div>
+
+            <p class="mt-3 whitespace-pre-line text-sm leading-relaxed text-nx-gray-dark">{p.abstract}</p>
+
+            <!-- Assegnazione serata + disponibilita' -->
+            <div class="mt-4 grid gap-3 rounded-lg bg-nx-off-white p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+              <label class="block text-xs">
+                <span class="block font-semibold uppercase tracking-wider text-nx-gray-dark">Serata assegnata</span>
+                <select data-prop-event data-id={p.id} class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs">
+                  <option value="">— non assegnata —</option>
+                  {eventsForSelect.map((ev) => (
+                    <option value={ev.id} selected={p.eventId === ev.id}>
+                      {fmtEventShort(ev.eventDate)} — {ev.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label class="block text-xs">
+                <span class="block font-semibold uppercase tracking-wider text-nx-gray-dark">Disponibilita'</span>
+                <select data-prop-avail data-id={p.id} class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs">
+                  <option value="none"      selected={p.availabilityStatus === "none"}>Non contattato</option>
+                  <option value="asked"     selected={p.availabilityStatus === "asked"}>Contattato (in attesa)</option>
+                  <option value="confirmed" selected={p.availabilityStatus === "confirmed"}>Disponibile</option>
+                  <option value="declined"  selected={p.availabilityStatus === "declined"}>Non disponibile</option>
+                </select>
+              </label>
+              <div class="flex flex-col gap-1">
+                <button
+                  type="button"
+                  data-prop-outreach
+                  data-id={p.id}
+                  class="rounded-lg bg-nx-cyan px-4 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-sm transition hover:bg-nx-blue"
+                  title="Componi e invia l'email di richiesta disponibilita' al relatore"
+                >
+                  Contatta per disponibilita'
+                </button>
+                {p.doneAt ? (
+                  <span class="inline-flex justify-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-800">
+                    ✓ Fatto · {fmtDate(p.doneAt)}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-prop-done
+                    data-id={p.id}
+                    class="rounded-lg border border-nx-blue/40 px-4 py-2 text-xs font-bold uppercase tracking-wider text-nx-blue transition hover:bg-nx-blue hover:text-white"
+                    title="Il talk è stato presentato: archivia e prepara l'email col link di modifica per l'autore"
+                  >
+                    Segna come fatto
+                  </button>
+                )}
+                <span data-prop-avail-badge={p.id} class={`inline-flex justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${avail.cls}`}>
+                  {avail.label}
+                </span>
+                {p.availabilityContactedAt && (
+                  <span class="text-[10px] text-nx-gray-dark text-center">
+                    ultimo contatto: {fmtDate(p.availabilityContactedAt)}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <!-- Articolo collegato + invio link di modifica (deferribile) -->
+            <div class="mt-3 grid gap-3 rounded-lg border border-nx-gray-light/30 bg-white p-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <label class="block text-xs">
+                <span class="block font-semibold uppercase tracking-wider text-nx-gray-dark">Articolo collegato</span>
+                <select data-prop-article data-id={p.id} class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs">
+                  <option value="">— nessuno —</option>
+                  {allArticles.map((a) => (
+                    <option value={a.id} selected={p.articleId === a.id}>
+                      {a.status === "published" ? "● " : "○ "}{a.title.slice(0, 60)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div class="flex flex-col gap-1">
+                <button
+                  type="button"
+                  data-prop-sendlink
+                  data-id={p.id}
+                  class="rounded-lg border border-nx-cyan/50 px-3 py-2 text-xs font-bold uppercase tracking-wider text-nx-cyan transition hover:bg-nx-cyan hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={!p.articleId}
+                  title={p.articleId ? "Apri l'email (modificabile) col link di modifica per l'autore" : "Collega prima un articolo"}
+                >
+                  Invia link di modifica
+                </button>
+                {linkedArticle && (
+                  <div class="flex flex-wrap items-center justify-center gap-2 text-[10px]">
+                    <a href={`/meetludica/${linkedArticle.slug}`} target="_blank" rel="noopener noreferrer" class="text-nx-blue no-underline hover:underline">↗ articolo</a>
+                    {linkedArticle.editToken && (
+                      <button type="button" data-copy-edit={`${siteBase}/meetludica/modifica/${linkedArticle.editToken}`} class="text-nx-cyan hover:underline">copia link modifica</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <details class="mt-3 text-xs">
+              <summary class="cursor-pointer text-nx-blue hover:underline" data-outreach-summary data-id={p.id}>
+                Storico email inviate
+              </summary>
+              <div data-outreach-list data-id={p.id} class="mt-2 space-y-2 text-nx-gray-dark">
+                <p class="text-[11px] italic">Caricamento...</p>
+              </div>
+            </details>
+          </article>
+        );
+      })
+    )}
+  </section>
+
+  <!-- ====================== TAB EVENTS ====================== -->
+  <section data-panel="events" class="nx-panel mt-6 hidden space-y-6">
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Crea nuova serata</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Le serate qui create diventano selezionabili nella scheda di ogni proposta per l'assegnazione e per l'email di richiesta disponibilita'.
+      </p>
+      <form id="event-form" class="mt-4 grid gap-3 sm:grid-cols-2">
+        <label class="block text-sm sm:col-span-2">
+          <span class="block font-medium text-nx-dark">Titolo serata</span>
+          <input name="title" required maxlength="200" placeholder="es. MeetLudica #07 — Educazione & giochi" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </label>
+        <label class="block text-sm">
+          <span class="block font-medium text-nx-dark">Data e ora</span>
+          <input name="eventDate" type="datetime-local" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </label>
+        <label class="block text-sm">
+          <span class="block font-medium text-nx-dark">Luogo</span>
+          <input name="location" maxlength="300" placeholder="es. Online (Meet) oppure Sala XYZ, Genova" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </label>
+        <label class="block text-sm">
+          <span class="block font-medium text-nx-dark">Link della call</span>
+          <input name="meetingUrl" type="url" maxlength="300" placeholder="Vuoto = lo stesso dell'ultima serata" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </label>
+        <label class="block text-sm sm:col-span-2">
+          <span class="block font-medium text-nx-dark">Abstract pubblico (mostrato nel calendario sul sito)</span>
+          <textarea name="description" rows="3" maxlength="5000" placeholder="Titolo e descrizione del talk visibili pubblicamente. Lascia vuoto se non ancora definito." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm"></textarea>
+        </label>
+        <label class="block text-sm sm:col-span-2">
+          <span class="block font-medium text-nx-dark">Note interne (opzionale)</span>
+          <textarea name="notes" rows="2" maxlength="2000" placeholder="Note NON pubbliche, solo per gli admin." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm"></textarea>
+        </label>
+        <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <button type="submit" id="event-submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">
+            Crea serata
+          </button>
+          <span id="event-status" class="text-xs"></span>
+        </div>
+      </form>
+    </div>
+
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="border-b border-nx-gray-light/20 px-6 py-4">
+        <h3 class="text-base font-bold text-nx-dark">Serate ({events.length})</h3>
+      </div>
+      {events.length === 0 ? (
+        <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessuna serata creata.</p>
+      ) : (
+        <div class="divide-y divide-nx-gray-light/20">
+          {events.map((ev) => {
+            const assignedProposals = proposals.filter((p) => p.eventId === ev.id);
+            return (
+              <div class="px-6 py-4" data-event-row data-event-id={ev.id}>
+                <div data-event-view class="flex flex-wrap items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-bold text-nx-dark">{ev.title}</p>
+                    <p class="mt-0.5 text-xs text-nx-gray-dark">
+                      {fmtEventDate(ev.eventDate)}{ev.location ? ` · ${ev.location}` : ""}
+                    </p>
+                    {ev.description && (
+                      <p class="mt-1 whitespace-pre-line text-xs text-nx-dark">{ev.description}</p>
+                    )}
+                    {ev.notes && (
+                      <p class="mt-1 whitespace-pre-line text-[11px] italic text-nx-gray-dark">Nota interna: {ev.notes}</p>
+                    )}
+                  </div>
+                  <div class="flex flex-wrap gap-2 text-xs">
+                    <button type="button" data-edit-event={ev.id} class="rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-nx-blue hover:bg-nx-cyan-light/20">Modifica</button>
+                    <button type="button" data-delete-event={ev.id} class="rounded border border-red-200 bg-white px-2 py-1 text-red-600 hover:bg-red-50">Elimina</button>
+                  </div>
+                </div>
+
+                <!-- Form modifica inline (nascosto di default) -->
+                <form data-event-edit-form data-event-id={ev.id} class="mt-2 hidden grid gap-2 rounded-lg bg-nx-off-white p-3 sm:grid-cols-2">
+                  <label class="block text-xs sm:col-span-2">
+                    <span class="font-semibold text-nx-gray-dark">Titolo</span>
+                    <input name="title" value={ev.title} maxlength="200" class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs" />
+                  </label>
+                  <label class="block text-xs">
+                    <span class="font-semibold text-nx-gray-dark">Data e ora</span>
+                    <input name="eventDate" type="datetime-local" value={toDatetimeLocal(ev.eventDate)} class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs" />
+                  </label>
+                  <label class="block text-xs">
+                    <span class="font-semibold text-nx-gray-dark">Luogo</span>
+                    <input name="location" value={ev.location ?? ""} maxlength="300" class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs" />
+                  </label>
+                  <label class="block text-xs">
+                    <span class="font-semibold text-nx-gray-dark">Link della call</span>
+                    <input name="meetingUrl" type="url" value={ev.meetingUrl ?? ""} maxlength="300" class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs" />
+                  </label>
+                  <label class="block text-xs sm:col-span-2">
+                    <span class="font-semibold text-nx-gray-dark">Abstract pubblico</span>
+                    <textarea name="description" rows="3" maxlength="5000" class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs">{ev.description ?? ""}</textarea>
+                  </label>
+                  <label class="block text-xs sm:col-span-2">
+                    <span class="font-semibold text-nx-gray-dark">Note interne</span>
+                    <textarea name="notes" rows="2" maxlength="2000" class="mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-xs">{ev.notes ?? ""}</textarea>
+                  </label>
+                  <div class="sm:col-span-2 flex items-center gap-2">
+                    <button type="submit" class="rounded bg-nx-cyan px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Salva</button>
+                    <button type="button" data-event-edit-cancel class="rounded border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold text-nx-gray-dark hover:bg-white">Annulla</button>
+                    <span data-event-edit-status class="text-xs"></span>
+                  </div>
+                </form>
+
+                {assignedProposals.length > 0 && (
+                  <ul class="mt-2 text-xs text-nx-gray-dark">
+                    {assignedProposals.map((p) => {
+                      const a = availLabels[p.availabilityStatus] ?? availLabels.none;
+                      return (
+                        <li class="flex flex-wrap items-baseline gap-2">
+                          <span>•</span>
+                          <span class="font-medium text-nx-dark">{p.talkTitle || "(senza titolo)"}</span>
+                          <span>— {p.name}</span>
+                          <span class={`inline-flex rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${a.cls}`}>{a.label}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- ====================== TAB ARTICOLI (approvazione staff) ====================== -->
+  <section data-panel="articles" class="nx-panel mt-6 hidden space-y-4">
+    <div class="rounded-lg border border-nx-cyan/30 bg-nx-cyan-light/20 px-4 py-3 text-xs text-nx-gray-dark">
+      Gli articoli restano <strong>privati</strong> finché lo staff non li approva. Privato = visibile solo all'autore tramite il suo link di modifica. <strong>Approva e pubblica</strong> lo rende visibile nell'archivio pubblico.
+    </div>
+    {allArticles.length === 0 ? (
+      <p class="rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">Nessun articolo.</p>
+    ) : (
+      allArticles.map((a) => (
+        <article class="rounded-xl border border-nx-gray-light/30 bg-white p-5" data-article-row data-article-id={a.id}>
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-base font-bold text-nx-dark">{a.title}</p>
+              <p class="mt-0.5 text-xs text-nx-gray-dark">{a.speaker} · {a.meetingDate} · resoconto di {a.authorName}</p>
+            </div>
+            <span data-article-status-badge={a.id} class={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${
+              a.status === "published" ? "bg-emerald-100 text-emerald-800"
+              : a.status === "draft" ? "bg-amber-100 text-amber-800"
+              : "bg-nx-gray-light/30 text-nx-gray-dark"
+            }`}>
+              {a.status === "published" ? "pubblico" : a.status === "draft" ? "privato" : "archiviato"}
+            </span>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            {a.status !== "published" ? (
+              <button type="button" data-article-publish={a.id} class="rounded-lg bg-nx-cyan px-3 py-1.5 font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Approva e pubblica</button>
+            ) : (
+              <button type="button" data-article-unpublish={a.id} class="rounded-lg border border-amber-300 px-3 py-1.5 font-semibold text-amber-700 hover:bg-amber-50">Rendi privato</button>
+            )}
+            <a href={`/meetludica/${a.slug}`} target="_blank" rel="noopener noreferrer" class="rounded border border-nx-gray-light/40 px-2 py-1.5 text-nx-blue no-underline hover:bg-nx-cyan-light/20">↗ Pagina</a>
+            {a.body && (
+              <a href={`/api/meetludica/articles/${a.slug}/pdf`} target="_blank" rel="noopener noreferrer" class="rounded border border-nx-gray-light/40 px-2 py-1.5 text-nx-blue no-underline hover:bg-nx-cyan-light/20">📄 PDF</a>
+            )}
+            {a.editToken && (
+              <a href={`/meetludica/modifica/${a.editToken}`} target="_blank" rel="noopener noreferrer" class="rounded border border-nx-cyan/40 bg-nx-cyan-light/20 px-2 py-1.5 font-semibold text-nx-cyan no-underline hover:bg-nx-cyan-light/40">✎ Modifica</a>
+            )}
+            {a.editToken && (
+              <button type="button" data-copy-edit={`${siteBase}/meetludica/modifica/${a.editToken}`} class="rounded border border-nx-cyan/40 px-2 py-1.5 font-semibold text-nx-cyan hover:bg-nx-cyan-light/30">Copia link autore</button>
+            )}
+            <span data-article-status-msg={a.id} class="text-[11px]"></span>
+          </div>
+        </article>
+      ))
+    )}
+  </section>
+
+  <!-- ====================== MODAL OUTREACH ====================== -->
+  <div id="outreach-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl rounded-xl bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-nx-gray-light/20 px-5 py-3">
+        <h3 id="outreach-title" class="text-base font-bold text-nx-dark">Contatta per disponibilita'</h3>
+        <button type="button" id="outreach-close" class="text-nx-gray-dark hover:text-nx-dark" aria-label="Chiudi">✕</button>
+      </div>
+      <form id="outreach-form" class="space-y-3 px-5 py-4">
+        <p class="text-xs text-nx-gray-dark">
+          <span class="font-semibold uppercase tracking-wider text-nx-blue">Da:</span>
+          <code class="font-mono">{fromDisplay}</code>
+        </p>
+        <p class="text-xs text-nx-gray-dark">
+          <span class="font-semibold uppercase tracking-wider text-nx-blue">A:</span>
+          <strong id="outreach-recipient" class="text-nx-dark"></strong>
+          <span id="outreach-event-info" class="ml-2"></span>
+        </p>
+        <p class="text-xs text-nx-gray-dark">
+          <span class="font-semibold uppercase tracking-wider text-nx-blue">CC:</span>
+          <span class="font-mono">{STAFF_CC.join(", ")}</span>
+        </p>
+        <label class="block text-sm">
+          <span class="block font-medium text-nx-dark">Oggetto</span>
+          <input id="outreach-subject" name="subject" required maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        </label>
+        <label class="block text-sm">
+          <span class="block font-medium text-nx-dark">Corpo email (markdown)</span>
+          <textarea id="outreach-body" name="body" required rows="14" maxlength="20000" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 font-mono text-xs"></textarea>
+        </label>
+        <div class="flex flex-wrap items-center justify-end gap-3 pt-2">
+          <span id="outreach-status" class="mr-auto text-xs"></span>
+          <button type="button" id="outreach-cancel" class="rounded-lg border border-nx-gray-light/40 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:bg-nx-off-white">
+            Annulla
+          </button>
+          <button type="submit" id="outreach-send" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">
+            Invia email
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ====================== TAB BROADCASTS HISTORY ====================== -->
+  <!-- ============ MONITORAGGIO RECAPITO ============ -->
+  <section data-panel="monitoraggio" class="nx-panel mt-6 hidden space-y-5">
+    {health && (
+      <>
+        <section class="grid gap-3 sm:grid-cols-4">
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Tasso di consegna</p>
+            <p class={`mt-1 text-2xl font-black ${health.deliveryRate == null ? "text-nx-gray-dark" : health.deliveryRate >= 95 ? "text-emerald-600" : health.deliveryRate >= 80 ? "text-amber-600" : "text-red-600"}`}>
+              {health.deliveryRate == null ? "—" : health.deliveryRate + "%"}
+            </p>
+            <p class="text-[10px] text-nx-gray-dark">sulle email con esito noto</p>
+          </div>
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Consegnate</p>
+            <p class="mt-1 text-2xl font-black text-emerald-600">{health.delivered}</p>
+            <p class="text-[10px] text-nx-gray-dark">su {health.tracked} invii tracciati</p>
+          </div>
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Non recapitate</p>
+            <p class={`mt-1 text-2xl font-black ${health.bounced + health.complained + health.failed > 0 ? "text-red-600" : "text-nx-dark"}`}>
+              {health.bounced + health.complained + health.failed}
+            </p>
+            <p class="text-[10px] text-nx-gray-dark">{health.bounced} rimbalzi · {health.complained} spam · {health.failed} errori</p>
+          </div>
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">In attesa di esito</p>
+            <p class="mt-1 text-2xl font-black text-nx-dark">{health.pending}</p>
+            <p class="text-[10px] text-nx-gray-dark">ultimo evento: {fmtEvent(health.lastEventAt)}</p>
+          </div>
+        </section>
+
+        <div class="flex flex-wrap items-center gap-3 rounded-lg border border-nx-gray-light/30 bg-white px-4 py-3">
+          <button type="button" id="refresh-delivery-2"
+            class="rounded-lg border border-nx-gray-light/50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan disabled:opacity-50">
+            Aggiorna stato consegna
+          </button>
+          <span class="text-xs text-nx-gray-dark">
+            Gli esiti arrivano da soli via webhook Resend. Questo pulsante forza il controllo sulle email ancora senza esito.
+          </span>
+          <span id="refresh-status-2" class="text-xs"></span>
+        </div>
+
+        {problemi.length > 0 && (
+          <div class="rounded-xl border border-red-200 bg-red-50/40 p-4">
+            <h3 class="text-sm font-bold text-red-800">Indirizzi da sistemare ({problemi.length})</h3>
+            <p class="mt-1 text-xs text-nx-gray-dark">
+              Un rimbalzo definitivo non si risolve da solo: l'indirizzo va corretto o rimosso, altrimenti peggiora la reputazione del dominio e danneggia il recapito verso tutti gli altri.
+            </p>
+            <ul class="mt-2 space-y-1 text-xs">
+              {problemi.map((s) => (
+                <li>
+                  <span class="font-mono text-nx-dark">{s.email}</span>
+                  <span class="text-nx-gray-dark"> — {statoLabel[s.lastStatus ?? ""] ?? s.lastStatus}{s.lastDetail ? `: ${s.lastDetail}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+          <div class="border-b border-nx-gray-light/20 px-6 py-4">
+            <h3 class="text-base font-bold text-nx-dark">Recapito per indirizzo</h3>
+            <p class="text-xs text-nx-gray-dark">{health.subscribers} iscritti · {health.trackedBroadcasts} broadcast tracciati</p>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+                <tr>
+                  <th class="px-4 py-2 text-left">Indirizzo</th>
+                  <th class="px-3 py-2 text-center">Inviate</th>
+                  <th class="px-3 py-2 text-center">Consegnate</th>
+                  <th class="px-3 py-2 text-center">Aperte</th>
+                  <th class="px-4 py-2 text-left">Ultimo esito</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-nx-gray-light/20">
+                {subHealth.map((s) => (
+                  <tr class={s.salute === "problema" ? "bg-red-50/50" : ""}>
+                    <td class="px-4 py-2">
+                      <span class="font-mono text-xs text-nx-dark">{s.email}</span>
+                      {!s.inLista && <span class="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] uppercase text-amber-700">non più in lista</span>}
+                    </td>
+                    <td class="px-3 py-2 text-center text-nx-gray-dark">{s.inviate}</td>
+                    <td class={`px-3 py-2 text-center font-semibold ${s.delivered > 0 ? "text-emerald-600" : "text-nx-gray-dark"}`}>{s.delivered}</td>
+                    <td class="px-3 py-2 text-center text-nx-gray-dark">{s.opened || "—"}</td>
+                    <td class="px-4 py-2 text-xs">
+                      {s.lastStatus ? (
+                        <span class={
+                          s.salute === "problema" ? "font-semibold text-red-600"
+                          : s.lastStatus === "delivered" ? "text-emerald-600" : "text-nx-gray-dark"
+                        }>{statoLabel[s.lastStatus] ?? s.lastStatus}</span>
+                      ) : (
+                        <span class="italic text-nx-gray-dark">nessun invio</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </>
+    )}
+  </section>
+
+  <section data-panel="broadcasts" class="nx-panel mt-6 hidden space-y-3">
+    {broadcasts.length > 0 && (
+      <div class="flex flex-wrap items-center gap-3 rounded-lg border border-nx-gray-light/30 bg-white px-4 py-3">
+        <button type="button" id="refresh-delivery"
+          class="rounded-lg border border-nx-gray-light/50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-nx-dark transition hover:border-nx-cyan hover:text-nx-cyan disabled:opacity-50">
+          Aggiorna stato consegna
+        </button>
+        <span class="text-xs text-nx-gray-dark">
+          Interroga Resend sulle email ancora "in attesa". <strong>In attesa</strong> significa partita ma senza conferma di recapito, non "non consegnata".
+        </span>
+        <span id="refresh-status" class="text-xs"></span>
+      </div>
+    )}
+    {broadcasts.length === 0 ? (
+      <p class="rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
+        Nessun broadcast ancora inviato.
+      </p>
+    ) : (
+      broadcasts.map((b) => {
+        const d = b.delivery;
+        const problems = problemsByBroadcast.get(b.id) ?? [];
+        return (
+        <details class="rounded-xl border border-nx-gray-light/30 bg-white">
+          <summary class="cursor-pointer px-5 py-3">
+            <div class="flex flex-wrap items-baseline justify-between gap-3">
+              <p class="text-sm font-bold text-nx-dark">{b.subject}</p>
+              <p class="text-xs text-nx-gray-dark">{fmtDate(b.sentAt)} — {b.sentCount} destinatari</p>
+            </div>
+            {d && d.tracked > 0 ? (
+              <div class="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                <span class="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">✓ {d.delivered} consegnate</span>
+                {d.bounced > 0 && <span class="rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700">✗ {d.bounced} rimbalzate</span>}
+                {d.complained > 0 && <span class="rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700">⚠ {d.complained} spam</span>}
+                {d.pending > 0 && <span class="rounded-full bg-nx-gray-light/20 px-2 py-0.5 font-semibold text-nx-gray-dark">{d.pending} in attesa</span>}
+                {d.opened > 0 && <span class="rounded-full bg-nx-cyan-light/30 px-2 py-0.5 font-semibold text-nx-cyan">{d.opened} aperte</span>}
+              </div>
+            ) : (
+              <p class="mt-2 text-[11px] text-nx-gray-dark">Nessun dato di consegna (webhook Resend non ancora configurato o invio precedente al tracciamento).</p>
+            )}
+          </summary>
+          <div class="border-t border-nx-gray-light/20 px-5 py-4 text-sm">
+            {problems.length > 0 && (
+              <div class="mb-3 rounded-lg border border-red-100 bg-red-50/50 p-3">
+                <p class="text-xs font-bold uppercase tracking-wider text-red-700">Non consegnate ({problems.length})</p>
+                <ul class="mt-1 space-y-0.5 text-xs text-nx-dark">
+                  {problems.map((p) => (
+                    <li>
+                      <span class="font-mono">{p.email}</span>
+                      <span class="text-nx-gray-dark"> — {p.status === "bounced" ? "rimbalzata" : "spam"}{p.detail ? `: ${p.detail}` : ""}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <pre class="whitespace-pre-wrap font-sans text-nx-gray-dark">{b.body}</pre>
+          </div>
+        </details>
+        );
+      })
+    )}
+  </section>
+</AreaSociLayout>
+
+<script is:inline define:vars={{ subscribersData: subscribers }}>
+  window.__nxSubscribers = subscribersData;
+</script>
+
+<script is:inline>
+  (function () {
+    // === Tab switcher ===
+    const tabs = document.querySelectorAll(".nx-tab");
+    const panels = document.querySelectorAll(".nx-panel");
+    tabs.forEach((t) => {
+      t.addEventListener("click", () => {
+        tabs.forEach((x) => {
+          x.classList.remove("nx-tab-active", "border-nx-cyan", "text-nx-cyan");
+          x.classList.add("border-transparent", "text-nx-gray-dark");
+        });
+        t.classList.remove("border-transparent", "text-nx-gray-dark");
+        t.classList.add("nx-tab-active", "border-nx-cyan", "text-nx-cyan");
+        const key = t.getAttribute("data-tab");
+        panels.forEach((p) => {
+          p.classList.toggle("hidden", p.getAttribute("data-panel") !== key);
+        });
+      });
+    });
+
+    // === Toolbar markdown insert ===
+    const bodyTa = document.getElementById("broadcast-body");
+    // Insert preservando l'undo stack del browser: usa document.execCommand("insertText")
+    // invece di scrivere direttamente textarea.value (che azzera la cronologia Ctrl+Z).
+    function insertAtCursor(textarea, before, selected, after) {
+      textarea.focus();
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const existingSel = textarea.value.slice(start, end);
+      const middle = existingSel || selected;
+      const insertText = before + middle + after;
+
+      let ok = false;
+      try {
+        ok = document.execCommand("insertText", false, insertText);
+      } catch (e) { /* alcuni browser possono lanciare */ }
+
+      if (!ok) {
+        // Fallback (Ctrl+Z andra' perso, ma almeno l'inserimento funziona)
+        textarea.setRangeText(insertText, start, end, "end");
+      }
+
+      const cursorStart = start + before.length;
+      const cursorEnd = cursorStart + middle.length;
+      textarea.setSelectionRange(cursorStart, cursorEnd);
+    }
+    const snippets = {
+      bold:    { before: "**", selected: "testo in grassetto", after: "**" },
+      italic:  { before: "*",  selected: "testo in corsivo",   after: "*" },
+      h2:      { before: "\n## ", selected: "Titolo", after: "\n" },
+      ul:      { before: "\n- ", selected: "", after: "" },
+      link:    { before: "[", selected: "testo del link", after: "](incolla-qui-l-indirizzo)" },
+      quote:   { before: "\n> ", selected: "testo della citazione", after: "\n" },
+      hr:      { before: "\n\n---\n\n", selected: "", after: "" },
+      speaker: {
+        before:
+          "\n:::speaker photo=\"https://\"\n**Nome Speaker** — *Titolo del talk*\n\n",
+        selected: "Abstract della presentazione...",
+        after: "\n:::\n",
+      },
+    };
+    document.querySelectorAll("[data-md-insert]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const kind = btn.getAttribute("data-md-insert");
+        const snip = snippets[kind];
+        if (!snip || !bodyTa) return;
+        insertAtCursor(bodyTa, snip.before, snip.selected, snip.after);
+      });
+    });
+
+    // === Upload foto speaker (Drive) ===
+    const photoBtn = document.getElementById("upload-speaker-photo-btn");
+    const photoInput = document.getElementById("speaker-photo-file");
+    const photoStatus = document.getElementById("upload-speaker-photo-status");
+    if (photoBtn && photoInput) {
+      photoBtn.addEventListener("click", () => photoInput.click());
+      photoInput.addEventListener("change", async () => {
+        const f = photoInput.files && photoInput.files[0];
+        if (!f) return;
+        if (f.size > 8 * 1024 * 1024) {
+          photoStatus.textContent = "✗ Troppo grande (max 8 MB)";
+          photoStatus.className = "self-center text-[11px] text-red-600";
+          photoInput.value = "";
+          return;
+        }
+        photoStatus.textContent = `Carico ${f.name}…`;
+        photoStatus.className = "self-center text-[11px] text-nx-gray-dark";
+        const fd = new FormData();
+        fd.append("file", f);
+        try {
+          const res = await fetch("/api/admin/meetludica/speaker-photos", {
+            method: "POST",
+            body: fd,
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            photoStatus.textContent = "✗ " + (data.error || res.status);
+            photoStatus.className = "self-center text-[11px] text-red-600";
+            photoInput.value = "";
+            return;
+          }
+          // Inserisce un riquadro speaker completo con la foto appena caricata
+          const url = data.url;
+          insertAtCursor(
+            bodyTa,
+            `\n:::speaker photo="${url}"\n**Nome Speaker** — *Titolo del talk*\n\n`,
+            "Abstract della presentazione...",
+            "\n:::\n",
+          );
+          photoStatus.innerHTML =
+            "✓ Foto caricata, riquadro inserito. " +
+            '<a href="' + url + '" target="_blank" class="text-nx-cyan underline">vedi</a>';
+          photoStatus.className = "self-center text-[11px] text-emerald-600";
+          photoInput.value = "";
+        } catch (e) {
+          photoStatus.textContent = "Errore di rete";
+          photoStatus.className = "self-center text-[11px] text-red-600";
+          photoInput.value = "";
+        }
+      });
+    }
+
+    // === Broadcast form ===
+    const bcForm = document.getElementById("broadcast-form");
+    const bcStatus = document.getElementById("broadcast-status");
+    const bcSendBtn = document.getElementById("broadcast-send-btn");
+    const bcPreviewBtn = document.getElementById("broadcast-preview-btn");
+    const bcPreview = document.getElementById("broadcast-preview");
+    const bcPreviewContent = document.getElementById("broadcast-preview-content");
+
+    async function broadcastCall(dryRun) {
+      const fd = new FormData(bcForm);
+      const body = { subject: fd.get("subject"), body: fd.get("body"), dryRun };
+      bcSendBtn.disabled = true;
+      bcStatus.textContent = dryRun ? "Generazione anteprima…" : "Invio in corso…";
+      bcStatus.className = "text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/meetludica/broadcast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          bcStatus.textContent = "✗ " + (data.error || res.status);
+          bcStatus.className = "text-xs text-red-600";
+          return;
+        }
+        if (dryRun) {
+          bcPreviewContent.innerHTML = data.preview || "";
+          bcPreview.classList.remove("hidden");
+          bcStatus.textContent = "✓ Anteprima generata (destinatari: " + data.recipientCount + ")";
+          bcStatus.className = "text-xs text-emerald-600";
+        } else {
+          bcStatus.textContent = "✓ Inviata a " + data.sent + " destinatari";
+          bcStatus.className = "text-xs font-semibold text-emerald-600";
+          setTimeout(() => location.reload(), 1500);
+        }
+      } catch (e) {
+        bcStatus.textContent = "Errore di rete";
+        bcStatus.className = "text-xs text-red-600";
+      } finally {
+        bcSendBtn.disabled = false;
+      }
+    }
+    bcForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!confirm("Sicuro/a di voler inviare il broadcast a tutti gli iscritti?")) return;
+      broadcastCall(false);
+    });
+    bcPreviewBtn.addEventListener("click", () => broadcastCall(true));
+
+    // === Bulk add ===
+    const bulkForm = document.getElementById("bulk-form");
+    const bulkStatus = document.getElementById("bulk-status");
+    const bulkSubmit = document.getElementById("bulk-submit");
+    bulkForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(bulkForm);
+      const emails = String(fd.get("emails") || "").trim();
+      if (!emails) {
+        bulkStatus.textContent = "Inserisci almeno una email";
+        bulkStatus.className = "text-xs text-red-600";
+        return;
+      }
+      bulkSubmit.disabled = true;
+      bulkStatus.textContent = "Importazione…";
+      bulkStatus.className = "text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/meetludica/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ emails }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          bulkStatus.textContent = "✗ " + (data.error || res.status);
+          bulkStatus.className = "text-xs text-red-600";
+          bulkSubmit.disabled = false;
+          return;
+        }
+        bulkStatus.textContent = `✓ Aggiunte ${data.added}, già presenti ${data.skipped}, non valide ${data.invalid + (data.unparsable || 0)}`;
+        bulkStatus.className = "text-xs font-semibold text-emerald-600";
+        setTimeout(() => location.reload(), 1500);
+      } catch (e) {
+        bulkStatus.textContent = "Errore di rete";
+        bulkStatus.className = "text-xs text-red-600";
+        bulkSubmit.disabled = false;
+      }
+    });
+
+    // === Delete subscriber ===
+    document.querySelectorAll("[data-delete-sub]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-delete-sub");
+        if (!confirm("Eliminare questa iscrizione?")) return;
+        try {
+          const res = await fetch("/api/admin/meetludica/subscribers?id=" + encodeURIComponent(id), { method: "DELETE" });
+          const data = await res.json();
+          if (data.ok) {
+            const row = document.querySelector(`[data-sub-row][data-sub-id="${id}"]`);
+            if (row) row.remove();
+          }
+        } catch (e) { /* swallow */ }
+      });
+    });
+
+    // === Change proposal status / event / availability ===
+    async function patchProposal(id, payload) {
+      try {
+        const res = await fetch("/api/admin/meetludica/proposals?id=" + encodeURIComponent(id), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        return await res.json();
+      } catch (e) { return { ok: false }; }
+    }
+
+    // Feedback "✓ salvato" effimero accanto ai controlli di una proposta
+    function flashSaved(id) {
+      const el = document.querySelector(`[data-prop-saved="${id}"]`);
+      if (!el) return;
+      el.classList.remove("hidden");
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.add("hidden"), 1800);
+    }
+
+    const STATUS_BADGE = {
+      pending:  { txt: "pending",  cls: "bg-amber-100 text-amber-800" },
+      accepted: { txt: "accepted", cls: "bg-emerald-100 text-emerald-800" },
+      rejected: { txt: "rejected", cls: "bg-red-100 text-red-800" },
+      archived: { txt: "archived", cls: "bg-nx-gray-light/30 text-nx-gray-dark" },
+    };
+    const AVAIL_BADGE = {
+      none:      { txt: "Non contattato", cls: "bg-nx-gray-light/20 text-nx-gray-dark" },
+      asked:     { txt: "Contattato",      cls: "bg-amber-100 text-amber-800" },
+      confirmed: { txt: "Disponibile",     cls: "bg-emerald-100 text-emerald-800" },
+      declined:  { txt: "Non disponibile", cls: "bg-red-100 text-red-800" },
+    };
+    function setBadge(el, baseClasses, txt, cls) {
+      if (!el) return;
+      el.className = baseClasses + " " + cls;
+      el.textContent = txt;
+    }
+
+    document.querySelectorAll("[data-prop-status]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchProposal(id, { status: sel.value });
+        if (r && r.ok) {
+          const b = STATUS_BADGE[sel.value];
+          setBadge(document.querySelector(`[data-prop-status-badge="${id}"]`),
+            "inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider", b.txt, b.cls);
+          flashSaved(id);
+        }
+      });
+    });
+    document.querySelectorAll("[data-prop-event]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchProposal(id, { eventId: sel.value || null });
+        if (r && r.ok) flashSaved(id);
+      });
+    });
+    document.querySelectorAll("[data-prop-avail]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchProposal(id, { availabilityStatus: sel.value });
+        if (r && r.ok) {
+          const b = AVAIL_BADGE[sel.value];
+          setBadge(document.querySelector(`[data-prop-avail-badge="${id}"]`),
+            "inline-flex justify-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", b.txt, b.cls);
+          flashSaved(id);
+        }
+      });
+    });
+
+    // === Event create form ===
+    const evForm = document.getElementById("event-form");
+    const evStatus = document.getElementById("event-status");
+    const evSubmit = document.getElementById("event-submit");
+    if (evForm) {
+      evForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(evForm);
+        const title = String(fd.get("title") || "").trim();
+        const dateStr = String(fd.get("eventDate") || "");
+        const locationStr = String(fd.get("location") || "").trim();
+        const notes = String(fd.get("notes") || "").trim();
+        const description = String(fd.get("description") || "").trim();
+        const meetingUrl = String(fd.get("meetingUrl") || "").trim();
+        if (!title || !dateStr) {
+          evStatus.textContent = "Titolo e data obbligatori";
+          evStatus.className = "text-xs text-red-600";
+          return;
+        }
+        const eventDate = dtLocalToUtcMs(dateStr);
+        evSubmit.disabled = true;
+        evStatus.textContent = "Creazione...";
+        evStatus.className = "text-xs text-nx-gray-dark";
+        try {
+          const res = await fetch("/api/admin/meetludica/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, eventDate, location: locationStr || null, notes: notes || null, description: description || null, ...(meetingUrl ? { meetingUrl } : {}) }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            evStatus.textContent = "✗ " + (data.error || res.status);
+            evStatus.className = "text-xs text-red-600";
+            evSubmit.disabled = false;
+            return;
+          }
+          evStatus.textContent = "✓ Serata creata";
+          evStatus.className = "text-xs font-semibold text-emerald-600";
+          setTimeout(() => location.reload(), 700);
+        } catch (e) {
+          evStatus.textContent = "Errore di rete";
+          evStatus.className = "text-xs text-red-600";
+          evSubmit.disabled = false;
+        }
+      });
+    }
+
+    // === Edit / delete event ===
+    document.querySelectorAll("[data-delete-event]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-delete-event");
+        if (!confirm("Eliminare questa serata?\n\nLe proposte assegnate non verranno cancellate ma torneranno 'non assegnate'.")) return;
+        try {
+          const res = await fetch("/api/admin/meetludica/events?id=" + encodeURIComponent(id), { method: "DELETE" });
+          const data = await res.json();
+          if (data.ok) location.reload();
+        } catch (e) { /* swallow */ }
+      });
+    });
+    // Offset (in minuti) di Europe/Rome rispetto a UTC per un dato istante.
+    function romeOffsetMinutes(utcMs) {
+      const d = new Date(utcMs);
+      const localStr = d.toLocaleString("en-US", { timeZone: "Europe/Rome" });
+      const utcStr = d.toLocaleString("en-US", { timeZone: "UTC" });
+      return Math.round((new Date(localStr) - new Date(utcStr)) / 60000);
+    }
+    // Converte "YYYY-MM-DDTHH:mm" (orario italiano digitato) in ms UTC,
+    // gestendo correttamente ora legale/solare di Roma.
+    function dtLocalToUtcMs(s) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+      if (!m) return NaN;
+      const naive = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0);
+      let off = romeOffsetMinutes(naive);
+      let utc = naive - off * 60000;
+      // Un secondo passaggio gestisce i confini DST
+      const off2 = romeOffsetMinutes(utc);
+      if (off2 !== off) utc = naive - off2 * 60000;
+      return utc;
+    }
+
+    // Modifica serata: toggle del form inline + salvataggio
+    document.querySelectorAll("[data-edit-event]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-edit-event");
+        const row = document.querySelector(`[data-event-row][data-event-id="${id}"]`);
+        const view = row?.querySelector("[data-event-view]");
+        const form = row?.querySelector("[data-event-edit-form]");
+        if (form) form.classList.toggle("hidden");
+        if (view) view.classList.toggle("opacity-50");
+      });
+    });
+    document.querySelectorAll("[data-event-edit-cancel]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const form = btn.closest("[data-event-edit-form]");
+        const row = btn.closest("[data-event-row]");
+        if (form) form.classList.add("hidden");
+        const view = row?.querySelector("[data-event-view]");
+        if (view) view.classList.remove("opacity-50");
+      });
+    });
+    document.querySelectorAll("[data-event-edit-form]").forEach((form) => {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const id = form.getAttribute("data-event-id");
+        const statusEl = form.querySelector("[data-event-edit-status]");
+        const fd = new FormData(form);
+        const dateStr = String(fd.get("eventDate") || "");
+        const payload = {
+          title: String(fd.get("title") || "").trim(),
+          location: String(fd.get("location") || "").trim() || null,
+          description: String(fd.get("description") || "").trim() || null,
+          notes: String(fd.get("notes") || "").trim() || null,
+          meetingUrl: String(fd.get("meetingUrl") || "").trim() || null,
+        };
+        if (dateStr) payload.eventDate = dtLocalToUtcMs(dateStr);
+        if (!payload.title) {
+          statusEl.textContent = "Titolo obbligatorio";
+          statusEl.className = "text-xs text-red-600";
+          return;
+        }
+        statusEl.textContent = "Salvataggio…";
+        statusEl.className = "text-xs text-nx-gray-dark";
+        try {
+          const res = await fetch("/api/admin/meetludica/events?id=" + encodeURIComponent(id), {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            statusEl.textContent = "✗ " + (data.error || res.status);
+            statusEl.className = "text-xs text-red-600";
+            return;
+          }
+          location.reload();
+        } catch (e) {
+          statusEl.textContent = "Errore di rete";
+          statusEl.className = "text-xs text-red-600";
+        }
+      });
+    });
+
+    // === Outreach: modal + send ===
+    const outreachModal = document.getElementById("outreach-modal");
+    const outreachForm = document.getElementById("outreach-form");
+    const outreachSubject = document.getElementById("outreach-subject");
+    const outreachBody = document.getElementById("outreach-body");
+    const outreachRecipient = document.getElementById("outreach-recipient");
+    const outreachEventInfo = document.getElementById("outreach-event-info");
+    const outreachStatus = document.getElementById("outreach-status");
+    const outreachSend = document.getElementById("outreach-send");
+    let outreachCurrentId = null;
+
+    function openOutreachModal() {
+      outreachModal.classList.remove("hidden");
+      outreachModal.classList.add("flex");
+    }
+    function closeOutreachModal() {
+      outreachModal.classList.add("hidden");
+      outreachModal.classList.remove("flex");
+      outreachCurrentId = null;
+      outreachStatus.textContent = "";
+      outreachSend.disabled = false;
+    }
+    document.getElementById("outreach-close")?.addEventListener("click", closeOutreachModal);
+    document.getElementById("outreach-cancel")?.addEventListener("click", closeOutreachModal);
+    outreachModal.addEventListener("click", (e) => {
+      if (e.target === outreachModal) closeOutreachModal();
+    });
+
+    const outreachTitle = document.getElementById("outreach-title");
+    document.querySelectorAll("[data-prop-outreach]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        if (outreachTitle) outreachTitle.textContent = "Contatta per disponibilità";
+        outreachCurrentId = id;
+        outreachSubject.value = "";
+        outreachBody.value = "Caricamento template...";
+        outreachStatus.textContent = "";
+        openOutreachModal();
+        try {
+          const res = await fetch("/api/admin/meetludica/proposals/" + encodeURIComponent(id) + "/outreach");
+          const data = await res.json();
+          if (!data.ok) {
+            outreachStatus.textContent = "✗ " + (data.error || "errore");
+            outreachStatus.className = "text-xs text-red-600";
+            return;
+          }
+          outreachRecipient.textContent = data.recipient || "";
+          outreachEventInfo.innerHTML = "";
+          outreachSubject.value = data.template?.subject || "";
+          outreachBody.value = data.template?.body || "";
+          renderOutreachHistory(id, data.history || []);
+        } catch (e) {
+          outreachStatus.textContent = "Errore di rete";
+          outreachStatus.className = "text-xs text-red-600";
+        }
+      });
+    });
+
+    // === Segna come fatto: archivia + crea/collega articolo privato (NIENTE email forzata) ===
+    document.querySelectorAll("[data-prop-done]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        if (!confirm("Segnare il talk come fatto?\n\nLa proposta verrà archiviata e (se non già collegato) verrà creato un articolo privato. Il link di modifica resta disponibile: potrai inviarlo all'autore quando vuoi col pulsante \"Invia link di modifica\".")) return;
+        btn.disabled = true;
+        try {
+          const res = await fetch("/api/admin/meetludica/proposals/" + encodeURIComponent(id) + "/mark-done", { method: "POST" });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            alert("Errore: " + (data.error || res.status));
+            btn.disabled = false;
+            return;
+          }
+          location.reload();
+        } catch (e) {
+          alert("Errore di rete");
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // === Articolo collegato: cambia article_id della proposta ===
+    document.querySelectorAll("[data-prop-article]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchProposal(id, { articleId: sel.value || null });
+        if (r && r.ok) {
+          flashSaved(id);
+          // abilita/disabilita "Invia link di modifica"
+          const btn = document.querySelector(`[data-prop-sendlink][data-id="${id}"]`);
+          if (btn) {
+            btn.disabled = !sel.value;
+            btn.setAttribute("title", sel.value ? "Apri l'email (modificabile) col link di modifica" : "Collega prima un articolo");
+          }
+        }
+      });
+    });
+
+    // === Invia link di modifica (deferito, on demand) ===
+    document.querySelectorAll("[data-prop-sendlink]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        try {
+          const res = await fetch("/api/admin/meetludica/proposals/" + encodeURIComponent(id) + "/edit-link-email");
+          const data = await res.json();
+          if (!res.ok || !data.ok) { alert("Errore: " + (data.error || res.status)); return; }
+          if (outreachTitle) outreachTitle.textContent = "Invia link di modifica";
+          outreachCurrentId = id;
+          outreachRecipient.textContent = data.recipient || "";
+          outreachEventInfo.innerHTML = "";
+          outreachSubject.value = data.template?.subject || "";
+          outreachBody.value = data.template?.body || "";
+          outreachStatus.textContent = "";
+          renderOutreachHistory(id, []);
+          openOutreachModal();
+        } catch (e) {
+          alert("Errore di rete");
+        }
+      });
+    });
+
+    // === Articoli: approva/pubblica, rendi privato, copia link autore ===
+    async function setArticleStatus(id, status, btn) {
+      const msg = document.querySelector(`[data-article-status-msg="${id}"]`);
+      if (btn) btn.disabled = true;
+      if (msg) { msg.textContent = "…"; msg.className = "text-[11px] text-nx-gray-dark"; }
+      try {
+        const res = await fetch("/api/admin/meetludica/articles/" + encodeURIComponent(id) + "/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          if (msg) { msg.textContent = "✗ " + (data.error || res.status); msg.className = "text-[11px] text-red-600"; }
+          if (btn) btn.disabled = false;
+          return;
+        }
+        location.reload();
+      } catch (e) {
+        if (msg) { msg.textContent = "Errore di rete"; msg.className = "text-[11px] text-red-600"; }
+        if (btn) btn.disabled = false;
+      }
+    }
+    document.querySelectorAll("[data-article-publish]").forEach((btn) => {
+      btn.addEventListener("click", () => setArticleStatus(btn.getAttribute("data-article-publish"), "published", btn));
+    });
+    document.querySelectorAll("[data-article-unpublish]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!confirm("Rendere di nuovo privato questo articolo? Non sarà più visibile nell'archivio pubblico.")) return;
+        setArticleStatus(btn.getAttribute("data-article-unpublish"), "draft", btn);
+      });
+    });
+    document.querySelectorAll("[data-copy-edit]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const link = btn.getAttribute("data-copy-edit");
+        try {
+          await navigator.clipboard.writeText(link);
+          const o = btn.textContent; btn.textContent = "✓ Copiato";
+          setTimeout(() => { btn.textContent = o; }, 1500);
+        } catch (e) { prompt("Copia il link:", link); }
+      });
+    });
+
+    outreachForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!outreachCurrentId) return;
+      const subject = outreachSubject.value.trim();
+      const body = outreachBody.value.trim();
+      if (!subject || !body) {
+        outreachStatus.textContent = "Oggetto e corpo obbligatori";
+        outreachStatus.className = "text-xs text-red-600";
+        return;
+      }
+      if (!confirm("Inviare l'email al relatore?")) return;
+      outreachSend.disabled = true;
+      outreachStatus.textContent = "Invio...";
+      outreachStatus.className = "text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/meetludica/proposals/" + encodeURIComponent(outreachCurrentId) + "/outreach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject, body }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          outreachStatus.textContent = "✗ " + (data.error || res.status);
+          outreachStatus.className = "text-xs text-red-600";
+          outreachSend.disabled = false;
+          return;
+        }
+        outreachStatus.textContent = "✓ Email inviata";
+        outreachStatus.className = "text-xs font-semibold text-emerald-600";
+        setTimeout(() => location.reload(), 900);
+      } catch (e) {
+        outreachStatus.textContent = "Errore di rete";
+        outreachStatus.className = "text-xs text-red-600";
+        outreachSend.disabled = false;
+      }
+    });
+
+    function fmtTs(ts) {
+      try { return new Date(ts).toLocaleString("it-IT", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+      catch (e) { return ""; }
+    }
+
+    function renderOutreachHistory(id, items) {
+      const target = document.querySelector(`[data-outreach-list][data-id="${id}"]`);
+      if (!target) return;
+      if (items.length === 0) {
+        target.innerHTML = '<p class="text-[11px] italic">Nessuna email inviata.</p>';
+        return;
+      }
+      target.innerHTML = items.map((o) => `
+        <details class="rounded border border-nx-gray-light/30 bg-white">
+          <summary class="cursor-pointer px-3 py-2 text-[11px]">
+            <strong>${fmtTs(o.sentAt)}</strong> — ${escapeHtml(o.subject)}
+          </summary>
+          <div class="border-t border-nx-gray-light/20 px-3 py-2">
+            <p class="mb-1 text-[10px] uppercase tracking-wider text-nx-gray-dark">Destinatario: ${escapeHtml(o.recipientEmail)}</p>
+            <pre class="whitespace-pre-wrap font-sans text-[11px] text-nx-dark">${escapeHtml(o.body)}</pre>
+          </div>
+        </details>
+      `).join("");
+    }
+    function escapeHtml(s) {
+      if (s == null) return "";
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    // Lazy-load storico outreach quando aperto
+    document.querySelectorAll("[data-outreach-summary]").forEach((sum) => {
+      sum.addEventListener("click", async (e) => {
+        const id = sum.getAttribute("data-id");
+        const target = document.querySelector(`[data-outreach-list][data-id="${id}"]`);
+        if (!target || target.getAttribute("data-loaded") === "1") return;
+        target.setAttribute("data-loaded", "1");
+        try {
+          const res = await fetch("/api/admin/meetludica/proposals/" + encodeURIComponent(id) + "/outreach");
+          const data = await res.json();
+          if (data.ok) renderOutreachHistory(id, data.history || []);
+        } catch (e) {
+          target.innerHTML = '<p class="text-[11px] text-red-600">Errore caricamento storico.</p>';
+        }
+      });
+    });
+
+    // === Export CSV ===
+    const exportLink = document.getElementById("export-csv");
+    if (exportLink) {
+      exportLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        const subs = window.__nxSubscribers || [];
+        const escape = (s) => {
+          if (s == null) return "";
+          const str = String(s);
+          if (/[",\r\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
+          return str;
+        };
+        const rows = [["Nome", "Email", "Note", "Data iscrizione"].join(",")];
+        for (const s of subs) {
+          rows.push([
+            escape(s.name),
+            escape(s.email),
+            escape(s.motivation ?? ""),
+            new Date(s.createdAt).toISOString(),
+          ].join(","));
+        }
+        const csv = "﻿" + rows.join("\r\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "meetludica-subscribers-" + new Date().toISOString().split("T")[0] + ".csv";
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    // === Aggiorna stato consegna (interroga Resend) ===
+    function wireRefresh(btnId, statusId) {
+      const btn = document.getElementById(btnId);
+      const st = document.getElementById(statusId);
+      if (!btn || !st) return;
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        st.textContent = "Interrogazione in corso…";
+        st.className = "text-xs text-nx-gray-dark";
+        try {
+          const res = await fetch("/api/admin/meetludica/broadcast-refresh", { method: "POST" });
+          const d = await res.json();
+          if (!res.ok || !d.ok) {
+            st.textContent = "✗ " + (d.error || res.status);
+            st.className = "text-xs text-red-600";
+            btn.disabled = false;
+            return;
+          }
+          const esiti = Object.keys(d.byStatus || {})
+            .map((k) => k + ": " + d.byStatus[k]).join(", ");
+          st.textContent = "✓ " + d.checked + " verificate, " + d.updated + " aggiornate"
+            + (esiti ? " (" + esiti + ")" : "")
+            + (d.rateLimited ? " — limite Resend raggiunto, ripremi per continuare" : "");
+          st.className = "text-xs font-semibold text-emerald-600";
+          if (d.updated > 0) setTimeout(() => location.reload(), 2000);
+          else btn.disabled = false;
+        } catch (e) {
+          st.textContent = "Errore di rete";
+          st.className = "text-xs text-red-600";
+          btn.disabled = false;
+        }
+      });
+    }
+    wireRefresh("refresh-delivery", "refresh-status");
+    wireRefresh("refresh-delivery-2", "refresh-status-2");
+  })();
+</script>

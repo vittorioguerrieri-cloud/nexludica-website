@@ -1,0 +1,366 @@
+---
+/**
+ * Pagina di dettaglio di un verbale: preview PDF embedded, info, bottoni
+ * "Invia in firma" e "Modifica" (se draft) / link al PDF firmato (se signed).
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { getVerbale, typeLabel } from "../../../server/verbali";
+import { listSignaturesForVerbale } from "../../../server/verbali-signatures";
+import { listAttachments, formatSize } from "../../../server/verbali-attachments";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+
+const { id } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db || !id) return new Response("Not found", { status: 404 });
+const v = await getVerbale(db, String(id));
+if (!v) return new Response("Verbale non trovato", { status: 404 });
+
+const signatures = await listSignaturesForVerbale(db, v.id);
+const attachments = await listAttachments(db, v.id);
+const sigsByEmail: Record<string, typeof signatures[number]> = {};
+for (const s of signatures) sigsByEmail[s.signerEmail.toLowerCase()] = s;
+
+const isAdmin = user.role === "admin";
+
+function statusBadge(s: typeof v.status): { label: string; cls: string } {
+  switch (s) {
+    case "draft": return { label: "Bozza", cls: "bg-nx-gray-light/40 text-nx-gray-dark" };
+    case "generated": return { label: "Generato", cls: "bg-sky-100 text-sky-700" };
+    case "sent_for_signature": return { label: "In attesa di firma", cls: "bg-amber-100 text-amber-700" };
+    case "signed": return { label: "Firmato", cls: "bg-emerald-100 text-emerald-700" };
+    case "archived": return { label: "Archiviato", cls: "bg-nx-gray-light/40 text-nx-gray-dark" };
+    case "voided": return { label: "Annullato", cls: "bg-red-100 text-red-700" };
+  }
+}
+const badge = statusBadge(v.status);
+---
+
+<AreaSociLayout title={`${v.title} — Area Soci`} active="verbali">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <a href="/area-soci/verbali" class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">← Indietro</a>
+      <h2 class="mt-2 text-2xl font-bold text-nx-dark">{v.title}</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        {typeLabel(v.type)} · {v.meetingDate}{v.meetingTime && ` · ore ${v.meetingTime}`}
+        {v.location && ` · ${v.location}`}
+      </p>
+    </div>
+    <span class={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${badge.cls}`}>{badge.label}</span>
+  </div>
+
+  <div class="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+    {/* === PREVIEW PDF === */}
+    <section>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">
+          {v.status === "signed" ? "PDF firmato" : "Anteprima PDF"}
+        </h3>
+        <div class="flex flex-wrap gap-2">
+          <a href={`/api/verbali/${v.id}/preview`} target="_blank" rel="noopener"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">
+            Apri PDF
+          </a>
+          <a href={`/api/verbali/${v.id}/preview?attachments=embed`} download={`${v.title.replace(/[^a-zA-Z0-9-_ ]+/g, "")}${v.status === "signed" ? " — firmato" : ""}.pdf`}
+            class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">
+            Scarica{attachments.length > 0 ? " (allegati + bilancio)" : " (con bilancio)"}
+          </a>
+          {v.status === "signed" && v.driveFileUrl && (
+            <a href={v.driveFileUrl} target="_blank" rel="noopener"
+              class="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-white no-underline hover:bg-emerald-700">
+              Drive ↗
+            </a>
+          )}
+          <a href={`/api/verbali/${v.id}/preview?format=md`} target="_blank" rel="noopener"
+            class="rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">
+            .md
+          </a>
+        </div>
+      </div>
+      {v.status === "signed" && (
+        <p class="mt-2 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          ✓ Verbale firmato da tutti. La copia con le firme embedded è sotto (preview live) ed è anche stata salvata automaticamente su Google Drive nella cartella <strong>Verbali firmati</strong>.
+        </p>
+      )}
+      <iframe src={`/api/verbali/${v.id}/preview`} class="mt-3 h-[80vh] w-full rounded-lg border border-nx-gray-light/30 bg-white" title="Anteprima verbale" />
+    </section>
+
+    {/* === SIDEBAR === */}
+    <aside class="space-y-4">
+      {/* FIRMATARI */}
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Firmatari</h3>
+        <ul class="mt-3 space-y-2 text-sm">
+          {v.signers.map((s) => {
+            const sig = sigsByEmail[s.email.toLowerCase()];
+            const status = sig?.status ?? "pending";
+            const badgeCls = {
+              signed:   "bg-emerald-100 text-emerald-700",
+              pending:  "bg-nx-gray-light/40 text-nx-gray-dark",
+              viewed:   "bg-amber-100 text-amber-700",
+              declined: "bg-red-100 text-red-700",
+              expired:  "bg-red-100 text-red-700",
+              revoked:  "bg-red-100 text-red-700",
+            }[status] ?? "bg-nx-gray-light/40 text-nx-gray-dark";
+            const badgeLabel = {
+              signed: "Firmato", pending: "Da inviare", viewed: "Visualizzato",
+              declined: "Rifiutato", expired: "Scaduto", revoked: "Revocato",
+            }[status] ?? "—";
+            return (
+              <li class="rounded-md border border-nx-gray-light/20 p-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="min-w-0">
+                    <p class="font-semibold text-nx-dark">{s.name}</p>
+                    <p class="truncate text-xs text-nx-gray-dark">{s.email}</p>
+                  </div>
+                  <span class={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${badgeCls}`}>{badgeLabel}</span>
+                </div>
+                {sig?.signedAt && (
+                  <p class="mt-1 text-[10px] text-emerald-700">
+                    {new Date(sig.signedAt).toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}
+                    {sig.signerIpHash && ` · IP ${sig.signerIpHash.slice(0, 8)}`}
+                  </p>
+                )}
+                {sig && !sig.signedAt && (
+                  <div class="mt-1 flex flex-wrap gap-2 text-[10px] text-nx-gray-dark">
+                    <span>Inviato: {new Date(sig.sentAt).toLocaleDateString("it-IT")}</span>
+                    {sig.viewedAt && <span>Visto: {new Date(sig.viewedAt).toLocaleDateString("it-IT")}</span>}
+                    {isAdmin && (
+                      <button data-copy-link={`https://nexludica.org/firma/${sig.token}`}
+                        class="text-nx-cyan hover:underline">
+                        Copia link
+                      </button>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+
+      {/* ALLEGATI */}
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <div class="flex items-baseline justify-between gap-2">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Allegati</h3>
+          <span class="text-[10px] text-nx-gray-dark">{attachments.length}</span>
+        </div>
+        <p class="mt-1 text-[11px] text-nx-gray-dark">
+          File aggiuntivi (PDF, immagini, documenti) annessi al verbale. Caricati su Drive
+          e visibili anche ai firmatari durante la firma.
+        </p>
+
+        <ul id="att-list" class="mt-3 space-y-2 text-xs">
+          {attachments.length === 0 ? (
+            <li class="rounded-md border-2 border-dashed border-nx-gray-light/30 p-3 text-center italic text-nx-gray-dark">
+              Nessun allegato.
+            </li>
+          ) : attachments.map((a) => (
+            <li class="flex items-start justify-between gap-2 rounded-md border border-nx-gray-light/20 p-2">
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-semibold text-nx-dark">{a.filename}</p>
+                <p class="mt-0.5 text-[10px] text-nx-gray-dark">
+                  {formatSize(a.sizeBytes)}{a.mimeType ? ` · ${a.mimeType}` : ""}
+                </p>
+                {a.notes && <p class="mt-1 text-[10px] italic text-nx-gray-dark">{a.notes}</p>}
+              </div>
+              <div class="flex shrink-0 flex-col items-end gap-1">
+                {a.driveViewUrl && (
+                  <a href={a.driveViewUrl} target="_blank" rel="noopener"
+                    class="text-[10px] font-bold uppercase tracking-wider text-nx-cyan hover:underline">
+                    Apri ↗
+                  </a>
+                )}
+                {isAdmin && (
+                  <button data-del-att={a.id} class="text-[10px] text-red-500 hover:text-red-700">Rimuovi</button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {isAdmin && (
+          <div class="mt-3">
+            <label class="block cursor-pointer">
+              <input id="att-input" type="file" class="hidden" />
+              <span class="block rounded-md border-2 border-dashed border-nx-cyan/40 px-3 py-3 text-center text-xs font-bold uppercase tracking-wider text-nx-cyan hover:bg-nx-cyan-light">
+                + Carica allegato
+              </span>
+            </label>
+            <p class="mt-1 text-[10px] text-nx-gray-dark">Max 100 MB / file. Tutti i tipi.</p>
+            <p id="att-msg" class="mt-2 hidden rounded-md p-2 text-[11px]"></p>
+          </div>
+        )}
+      </div>
+
+      {/* ACTIONS */}
+      {isAdmin && (
+        <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Azioni</h3>
+          <div class="mt-3 space-y-2">
+            {v.status === "draft" && (
+              <>
+                <a href={`/area-soci/verbali/${v.id}/modifica`}
+                  class="block w-full rounded-md border border-nx-cyan px-4 py-2 text-center text-sm font-bold uppercase tracking-wider text-nx-cyan no-underline hover:bg-nx-cyan-light">
+                  ✎ Modifica bozza
+                </a>
+                <button id="send-btn" class="w-full rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white shadow transition hover:-translate-y-0.5">
+                  Invia richieste di firma
+                </button>
+                <p class="text-[11px] text-nx-gray-dark">
+                  Ogni firmatario riceverà via email un link univoco per firmare elettronicamente.
+                  Firma elettronica semplice (eIDAS art. 25).
+                </p>
+              </>
+            )}
+            {v.status === "sent_for_signature" && (
+              <div class="rounded-md bg-amber-50 p-3 text-xs text-amber-900">
+                <p>
+                  Richieste di firma inviate. Ogni firmatario ha ricevuto un'email con un link
+                  univoco di firma (scadenza 30 giorni). Lo stato di ognuno è visibile sotto.
+                </p>
+                <p class="mt-2">
+                  Quando tutti avranno firmato, il PDF firmato verrà rigenerato con le firme
+                  embedded e salvato automaticamente su Drive.
+                </p>
+              </div>
+            )}
+            {v.status === "signed" && v.driveFileUrl && (
+              <a href={v.driveFileUrl} target="_blank" rel="noopener"
+                class="block w-full rounded-md bg-emerald-600 px-4 py-2 text-center text-sm font-bold text-white no-underline shadow hover:-translate-y-0.5 transition">
+                Apri PDF firmato su Drive
+              </a>
+            )}
+
+            <div class="mt-3 border-t border-nx-gray-light/20 pt-3">
+              <button id="delete-btn"
+                class="w-full rounded-md border border-nx-gray-light/40 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-nx-gray-dark hover:border-red-300 hover:text-red-600">
+                Sposta nel cestino
+              </button>
+              <p class="mt-1 text-[11px] text-nx-gray-dark">
+                Il verbale finisce nel cestino (non più in lista). Da lì potrai ripristinarlo o eliminarlo definitivamente.
+              </p>
+            </div>
+          </div>
+          <p id="action-msg" class="mt-3 hidden rounded-md p-2 text-xs"></p>
+        </div>
+      )}
+
+      {/* METADATA */}
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Dettagli</h3>
+        <dl class="mt-3 space-y-1.5 text-xs">
+          <div><dt class="inline font-semibold">Presidente:</dt> <dd class="inline">{v.presidentName ?? "—"}</dd></div>
+          <div><dt class="inline font-semibold">Segretario:</dt> <dd class="inline">{v.secretaryName ?? "—"}</dd></div>
+          <div><dt class="inline font-semibold">Presenti:</dt> <dd class="inline">{v.attendeesPresent.length}</dd></div>
+          <div><dt class="inline font-semibold">Assenti:</dt> <dd class="inline">{v.attendeesAbsent.length}</dd></div>
+          <div><dt class="inline font-semibold">Punti odg:</dt> <dd class="inline">{v.agendaItems.length}</dd></div>
+          {v.sentAt && <div><dt class="inline font-semibold">Inviato:</dt> <dd class="inline">{new Date(v.sentAt).toLocaleString("it-IT")}</dd></div>}
+          {v.signedAt && <div><dt class="inline font-semibold">Firmato:</dt> <dd class="inline">{new Date(v.signedAt).toLocaleString("it-IT")}</dd></div>}
+        </dl>
+      </div>
+    </aside>
+  </div>
+
+  <script is:inline define:vars={{ verbaleId: v.id }}>
+    document.getElementById("send-btn")?.addEventListener("click", async () => {
+      const btn = document.getElementById("send-btn");
+      const msg = document.getElementById("action-msg");
+      if (!confirm("Invio le richieste di firma? Ogni firmatario riceverà un link univoco via email.")) return;
+      btn.disabled = true; btn.textContent = "Invio in corso…";
+      try {
+        const r = await fetch(`/api/verbali/${verbaleId}/send-signatures`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) {
+          const failed = (j.sent || []).filter((s) => !s.ok).map((s) => `${s.name}: ${s.error}`).join("; ");
+          throw new Error(j.error || failed || "Errore invio");
+        }
+        msg.textContent = `Inviati ${j.sent.length} link di firma. Ricarico…`;
+        msg.className = "mt-3 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800";
+        msg.classList.remove("hidden");
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (e) {
+        msg.textContent = "Errore: " + e.message;
+        msg.className = "mt-3 rounded-md bg-red-50 p-2 text-xs text-red-700";
+        msg.classList.remove("hidden");
+        btn.disabled = false; btn.textContent = "Invia richieste di firma";
+      }
+    });
+
+    // Copy-link buttons (admin) per i firmatari pending/viewed
+    document.querySelectorAll("[data-copy-link]").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const link = btn.dataset.copyLink;
+        try {
+          await navigator.clipboard.writeText(link);
+          const orig = btn.textContent;
+          btn.textContent = "✓ Copiato";
+          setTimeout(() => { btn.textContent = orig; }, 1200);
+        } catch { alert("Link: " + link); }
+      });
+    });
+
+    // ============ ALLEGATI ============
+    const attInput = document.getElementById("att-input");
+    const attMsg = document.getElementById("att-msg");
+    function setAttMsg(text, kind) {
+      if (!attMsg) return;
+      attMsg.textContent = text;
+      attMsg.className = "mt-2 rounded-md p-2 text-[11px] " + (
+        kind === "ok" ? "bg-emerald-50 text-emerald-800" :
+        kind === "err" ? "bg-red-50 text-red-700" :
+        "bg-amber-50 text-amber-800"
+      );
+      attMsg.classList.remove("hidden");
+    }
+    attInput?.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (file.size > 100 * 1024 * 1024) {
+        setAttMsg("File troppo grande (max 100 MB)", "err");
+        attInput.value = "";
+        return;
+      }
+      setAttMsg(`Caricamento ${file.name}…`, "wait");
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const r = await fetch(`/api/verbali/${verbaleId}/attachments`, { method: "POST", body: fd });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore upload");
+        setAttMsg("Caricato! Ricarico…", "ok");
+        setTimeout(() => window.location.reload(), 600);
+      } catch (e) {
+        setAttMsg("Errore: " + e.message, "err");
+        attInput.value = "";
+      }
+    });
+    document.querySelectorAll("[data-del-att]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Rimuovere l'allegato? Sarà cancellato anche dal Drive.")) return;
+        const id = btn.dataset.delAtt;
+        const r = await fetch(`/api/verbali/attachments/${id}`, { method: "DELETE" });
+        if (r.ok) window.location.reload();
+      });
+    });
+
+    const delBtn = document.getElementById("delete-btn");
+    delBtn?.addEventListener("click", async () => {
+      if (!confirm("Spostare il verbale nel cestino?\n\nNon comparirà più in lista, ma potrai ripristinarlo o eliminarlo definitivamente dal cestino.")) return;
+      delBtn.disabled = true;
+      const r = await fetch(`/api/verbali/${verbaleId}`, { method: "DELETE" });
+      if (r.ok) window.location.href = "/area-soci/verbali";
+      else { alert("Errore durante lo spostamento nel cestino"); delBtn.disabled = false; }
+    });
+  </script>
+</AreaSociLayout>

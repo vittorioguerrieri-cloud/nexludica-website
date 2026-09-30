@@ -68,13 +68,16 @@ const GIORNI_IT = [
 ];
 
 export function formatItalianDate(d: Date): string {
-  const giorno = GIORNI_IT[d.getDay()];
-  const num = d.getDate();
-  const mese = MESI_IT[d.getMonth()];
-  const anno = d.getFullYear();
-  const ora = d.getHours().toString().padStart(2, "0");
-  const min = d.getMinutes().toString().padStart(2, "0");
-  return `${giorno} ${num} ${mese} ${anno} · ${ora}:${min}`;
+  // Sempre in ora italiana (Europe/Rome), indipendente dal fuso del runtime.
+  const p = new Intl.DateTimeFormat("it-IT", {
+    timeZone: "Europe/Rome",
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(d).reduce((a: Record<string, string>, x) => {
+    a[x.type] = x.value;
+    return a;
+  }, {});
+  return `${p.weekday} ${p.day} ${p.month} ${p.year} · ${p.hour}:${p.minute}`;
 }
 
 /**

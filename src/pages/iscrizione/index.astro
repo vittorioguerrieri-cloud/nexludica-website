@@ -1,0 +1,320 @@
+---
+/**
+ * Pagina pubblica di iscrizione self-service.
+ *
+ * Accesso: solo con un token di invito valido in querystring.
+ *   https://nexludica.org/iscrizione?token=XXX
+ *
+ * Workflow:
+ *   1) Server-side: valida il token. Se non valido, mostra messaggio errore.
+ *   2) Se valido, mostra il form con eventuali campi pre-compilati dall'invito.
+ *   3) Submit: multipart → POST /api/iscrizione → crea utente pending
+ *      → redirect a /iscrizione/grazie
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getDb, getEnv } from "../../server/db";
+import { validateInvitation } from "../../server/invitations";
+
+export const prerender = false;
+
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const token = (Astro.url.searchParams.get("token") ?? "").trim();
+
+let error: string | null = null;
+let intendedName: string | null = null;
+let intendedEmail: string | null = null;
+
+if (!token) {
+  error = "Link non valido: token mancante. Richiedi un nuovo link all'associazione.";
+} else {
+  const env = await getEnv();
+  const db = getDb(env as Env);
+  if (!db) {
+    error = "Servizio non disponibile, riprova piu' tardi.";
+  } else {
+    const r = await validateInvitation(db, token);
+    if (!r.ok) {
+      error = r.error;
+    } else {
+      intendedName = r.invitation.intendedName;
+      intendedEmail = r.invitation.intendedEmail;
+    }
+  }
+}
+
+const today = new Date().toISOString().slice(0, 10);
+---
+
+<BaseLayout title="Iscrizione — NexLudica APS" description="Iscriviti a NexLudica APS" noindex={true}>
+  <main class="mx-auto max-w-3xl px-4 py-12 sm:py-16">
+    <header class="mb-10">
+      <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Iscrizione</p>
+      <h1 class="mt-3 text-3xl font-black tracking-tight text-nx-dark sm:text-4xl" style="font-family: var(--font-display);">
+        Iscriviti a NexLudica APS
+      </h1>
+      <p class="mt-4 text-base text-nx-gray-dark">
+        Compila il form per completare l'iscrizione. I dati sono richiesti dal
+        Codice del Terzo Settore (D.Lgs. 117/2017) per la tenuta del libro soci
+        e trattati secondo l'informativa privacy.
+      </p>
+    </header>
+
+    {error ? (
+      <div class="rounded-xl border-2 border-red-200 bg-red-50 p-6 text-center">
+        <h2 class="text-lg font-bold text-red-900">Link non utilizzabile</h2>
+        <p class="mt-2 text-sm text-red-800">{error}</p>
+        <p class="mt-4 text-xs text-nx-gray-dark">
+          Se pensi sia un errore scrivici a <a href="mailto:info@nexludica.org" class="text-nx-cyan underline">info@nexludica.org</a>.
+        </p>
+      </div>
+    ) : (
+      <form id="iscrizione-form" class="space-y-6" enctype="multipart/form-data">
+        <input type="hidden" name="token" value={token} />
+
+        <!-- 1. ANAGRAFICA -->
+        <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+          <h2 class="text-base font-bold text-nx-dark">1. Dati anagrafici</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">Obbligatori per il libro soci (art. 15 D.Lgs. 117/2017).</p>
+          <div class="mt-4 grid gap-5 sm:grid-cols-2">
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Nome e cognome <span class="text-red-500">*</span></label>
+              <input name="name" required value={intendedName ?? ""} maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Codice fiscale <span class="text-red-500">*</span></label>
+              <input name="fiscalCode" required maxlength="16" pattern="[A-Za-z0-9]{16}" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm uppercase focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+              <p id="fc-feedback" class="mt-1 text-xs"></p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Data di nascita <span class="text-red-500">*</span></label>
+              <input type="date" name="birthDate" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Luogo di nascita <span class="text-red-500">*</span></label>
+              <input name="birthPlace" required placeholder="es. Genova (GE)" maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Cittadinanza</label>
+              <input name="citizenship" value="Italiana" maxlength="60" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Telefono</label>
+              <input name="phone" type="tel" maxlength="32" placeholder="+39 ..." class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. RESIDENZA -->
+        <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+          <h2 class="text-base font-bold text-nx-dark">2. Residenza</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">Indirizzo come da carta d'identita'.</p>
+          <div class="mt-4 grid gap-5 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <label class="block text-sm font-medium text-nx-dark">Indirizzo <span class="text-red-500">*</span></label>
+              <input name="address" required placeholder="es. Via Roma 12" maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Comune <span class="text-red-500">*</span></label>
+              <input name="city" required maxlength="100" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">CAP <span class="text-red-500">*</span></label>
+              <input name="postalCode" required maxlength="10" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Provincia <span class="text-red-500">*</span></label>
+              <input name="province" required maxlength="3" placeholder="GE" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm uppercase focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Paese</label>
+              <input name="country" value="IT" maxlength="3" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm uppercase focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. CONTATTO -->
+        <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+          <h2 class="text-base font-bold text-nx-dark">3. Email di contatto</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            La useremo per comunicazioni associative e per l'accesso all'area soci.
+          </p>
+          <div class="mt-4">
+            <label class="block text-sm font-medium text-nx-dark">Email <span class="text-red-500">*</span></label>
+            <input type="email" name="email" required value={intendedEmail ?? ""} maxlength="200" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          </div>
+        </section>
+
+        <!-- 4. PROFILO (opzionale) -->
+        <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+          <div class="flex items-baseline justify-between gap-3">
+            <h2 class="text-base font-bold text-nx-dark">4. Profilo pubblico</h2>
+            <span class="text-xs text-nx-gray-dark">Facoltativo</span>
+          </div>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Se acconsenti alla pubblicazione (sezione 5), questi dati saranno visibili
+            sulla pagina "Chi siamo" del sito. Puoi modificarli in qualsiasi momento
+            dopo aver effettuato l'accesso.
+          </p>
+          <div class="mt-4 grid gap-5 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <label class="block text-sm font-medium text-nx-dark">Foto profilo</label>
+              <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" class="mt-1 block w-full rounded-lg border border-dashed border-nx-gray-light/40 bg-nx-off-white px-3 py-2 text-sm" />
+              <p class="mt-1 text-xs text-nx-gray-dark">JPG / PNG / WebP, max 5 MB. Idealmente quadrata.</p>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-sm font-medium text-nx-dark">Bio breve</label>
+              <textarea name="bio" rows="3" maxlength="1000" placeholder="Cosa ti porta in NexLudica? Qual e' il tuo background?" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="block text-sm font-medium text-nx-dark">Competenze</label>
+              <input name="skills" placeholder="es. Psicometria, Game design, Lavoro sociale" maxlength="400" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+              <p class="mt-1 text-xs text-nx-gray-dark">Separa le competenze con una virgola.</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Sito web</label>
+              <input type="url" name="website" placeholder="https://..." maxlength="300" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-nx-dark">Instagram</label>
+              <input type="url" name="instagram" placeholder="https://instagram.com/..." maxlength="300" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. CONSENSI GDPR -->
+        <section class="rounded-xl border-2 border-amber-300 bg-amber-50/30 p-6">
+          <h2 class="text-base font-bold text-nx-dark">5. Consensi privacy</h2>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Obbligatori per legge (Reg. UE 2016/679 e D.Lgs. 196/2003).
+          </p>
+          <div class="mt-4 space-y-3">
+            <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+              <input type="checkbox" name="consentPrivacyAt" value="1" required class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+              <span class="text-xs text-nx-gray-dark leading-relaxed">
+                Dichiaro di aver letto e accettato l'<a href="/privacy-policy" target="_blank" class="text-nx-cyan underline">informativa privacy</a> ai sensi dell'art. 13 Reg. UE 2016/679.
+                <span class="text-red-500">*</span>
+              </span>
+            </label>
+            <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+              <input type="checkbox" name="consentStatuteAt" value="1" required class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+              <span class="text-xs text-nx-gray-dark leading-relaxed">
+                Dichiaro di aver preso visione e di accettare lo statuto di NexLudica APS.
+                <span class="text-red-500">*</span>
+              </span>
+            </label>
+            <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+              <input type="checkbox" name="wantPublicProfile" value="1" class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+              <span class="text-xs text-nx-gray-dark leading-relaxed">
+                <strong>Voglio comparire sul sito</strong> — desidero apparire sulla pagina "Chi siamo" di nexludica.org con foto, nome, ruolo e bio. Posso modificare o rimuovere il mio profilo in qualsiasi momento dall'area soci.
+              </span>
+            </label>
+            <label class="flex cursor-pointer items-start gap-3 rounded-lg bg-white p-3 transition hover:bg-nx-cyan-light/20">
+              <input type="checkbox" name="consentMarketingAt" value="1" class="mt-0.5 h-4 w-4 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+              <span class="text-xs text-nx-gray-dark leading-relaxed">
+                Acconsento a ricevere newsletter e comunicazioni informative dall'associazione.
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <!-- Submit -->
+        <div class="flex flex-wrap items-center gap-4">
+          <button type="submit" id="submit-btn" class="rounded-lg bg-nx-cyan px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50 disabled:cursor-not-allowed">
+            Invia iscrizione
+          </button>
+          <span id="form-status" class="text-sm"></span>
+        </div>
+
+        <p class="text-xs text-nx-gray-dark">
+          Dopo l'invio la tua iscrizione verra' verificata e approvata dal
+          consiglio direttivo. Riceverai una email di conferma con le istruzioni
+          per accedere all'area soci.
+        </p>
+      </form>
+    )}
+  </main>
+</BaseLayout>
+
+{!error && (
+<script is:inline>
+  (function () {
+    const form = document.getElementById("iscrizione-form");
+    if (!form) return;
+    const statusEl = document.getElementById("form-status");
+    const submitBtn = document.getElementById("submit-btn");
+    const fcInput = form.querySelector('input[name="fiscalCode"]');
+    const fcFeedback = document.getElementById("fc-feedback");
+
+    // Validazione codice fiscale lato client
+    const FC_FORMAT = /^[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-EHLMPR-T][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]$/;
+    const ODD = {"0":1,"1":0,"2":5,"3":7,"4":9,"5":13,"6":15,"7":17,"8":19,"9":21,A:1,B:0,C:5,D:7,E:9,F:13,G:15,H:17,I:19,J:21,K:2,L:4,M:18,N:20,O:11,P:3,Q:6,R:8,S:12,T:14,U:16,V:10,W:22,X:25,Y:24,Z:23};
+    const EVEN = {"0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,A:0,B:1,C:2,D:3,E:4,F:5,G:6,H:7,I:8,J:9,K:10,L:11,M:12,N:13,O:14,P:15,Q:16,R:17,S:18,T:19,U:20,V:21,W:22,X:23,Y:24,Z:25};
+    function validateFc(input) {
+      const cf = (input || "").trim().toUpperCase().replace(/\s+/g, "");
+      if (cf.length === 0) return { ok: null };
+      if (cf.length !== 16) return { ok: false, msg: "Deve essere lungo 16 caratteri" };
+      if (!FC_FORMAT.test(cf)) return { ok: false, msg: "Formato non valido" };
+      let sum = 0;
+      for (let i = 0; i < 15; i++) {
+        const ch = cf[i];
+        const v = i % 2 === 0 ? ODD[ch] : EVEN[ch];
+        if (v === undefined) return { ok: false, msg: "Carattere non valido" };
+        sum += v;
+      }
+      const check = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[sum % 26];
+      if (check !== cf[15]) return { ok: false, msg: "Cifra di controllo errata" };
+      return { ok: true, msg: "✓ Codice fiscale valido" };
+    }
+    if (fcInput) {
+      fcInput.addEventListener("input", () => {
+        fcInput.value = fcInput.value.toUpperCase();
+        const r = validateFc(fcInput.value);
+        if (r.ok === null) {
+          fcFeedback.textContent = "";
+          fcFeedback.className = "mt-1 text-xs";
+        } else if (r.ok) {
+          fcFeedback.textContent = r.msg;
+          fcFeedback.className = "mt-1 text-xs text-emerald-600";
+        } else {
+          fcFeedback.textContent = r.msg;
+          fcFeedback.className = "mt-1 text-xs text-red-600";
+        }
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      statusEl.textContent = "Invio in corso...";
+      statusEl.className = "text-sm text-nx-gray-dark";
+      // Submit come multipart (per supportare la foto)
+      const fd = new FormData(form);
+      // Normalizza checkbox a "1" stringa solo se selezionati (FormData li
+      // include solo se checkbox e' checked, valore = "value" attribute)
+      try {
+        const res = await fetch("/api/iscrizione", {
+          method: "POST",
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          statusEl.textContent = "Errore: " + (data.error || res.status);
+          statusEl.className = "text-sm text-red-600";
+          submitBtn.disabled = false;
+          return;
+        }
+        statusEl.textContent = "✓ Inviato. Reindirizzamento...";
+        statusEl.className = "text-sm text-emerald-600";
+        setTimeout(() => {
+          window.location.href = "/iscrizione/grazie";
+        }, 600);
+      } catch (err) {
+        statusEl.textContent = "Errore di rete";
+        statusEl.className = "text-sm text-red-600";
+        submitBtn.disabled = false;
+      }
+    });
+  })();
+</script>
+)}

@@ -1,0 +1,203 @@
+---
+/**
+ * Scheda di un oggetto del catalogo miniature. Statica, noindex.
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import MmfViewer from "../../components/MmfViewer.astro";
+import index from "../../data/mmf/index.json";
+import { MMF_BASE, fmtSize, fmtDate, r2, SOURCE_LABEL, baseName, dirName } from "../../lib/mmf";
+
+export async function getStaticPaths() {
+  const details = import.meta.glob("../../data/mmf/objects/*.json", { eager: true, import: "default" }) as Record<
+    string,
+    any
+  >;
+  const byId = new Map<number, any>();
+  for (const [path, det] of Object.entries(details)) byId.set(Number(path.match(/(\d+)\.json$/)![1]), det);
+  return index.map((o) => ({ params: { slug: o.slug }, props: { obj: byId.get(o.id) } }));
+}
+
+const { obj } = Astro.props as { obj: any };
+const images: any[] = obj.images ?? [];
+const files: any[] = obj.files ?? [];
+const primary = images.find((i) => i.primary) ?? images[0];
+const others = images.filter((i) => i !== primary);
+const totalStl = files.reduce((a: number, f: any) => a + f.entries.filter((e: any) => e.ext === "stl").length, 0);
+const skippedReasons = Object.entries(obj.renderSkipped ?? {}) as [string, number][];
+const reasonLabel: Record<string, string> = {
+  cap: "oltre il limite di 80 render per oggetto",
+  "too big": "file oltre 200 MB",
+};
+const driveFolderUrl = obj.driveFolder ? `https://drive.google.com/drive/folders/${obj.driveFolder}` : null;
+const driveFileUrl = (id?: string | null) => (id ? `https://drive.google.com/file/d/${id}/view` : null);
+
+/** Raggruppa le entry di un file per cartella interna allo zip. */
+function groups(entries: any[]) {
+  const m = new Map<string, any[]>();
+  for (const e of entries) {
+    const d = dirName(e.path);
+    if (!m.has(d)) m.set(d, []);
+    m.get(d)!.push(e);
+  }
+  return [...m.entries()];
+}
+---
+
+<BaseLayout title={`${obj.name} — Catalogo miniature`} description={`${obj.name} di ${obj.creatorName}`} noindex={true}>
+  <section class="mx-auto max-w-6xl px-4 pb-4 pt-24">
+    <a href={`${MMF_BASE}/`} class="text-sm text-nx-cyan no-underline hover:underline">&larr; Catalogo</a>
+    <div class="mt-3 flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0">
+        <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">{obj.creatorName}</p>
+        <h1 class="mt-1 text-2xl font-extrabold leading-tight text-nx-dark md:text-3xl" style="font-family: var(--font-display);">
+          {obj.name}
+        </h1>
+        <p class="mt-2 text-sm text-nx-gray-dark">
+          {obj.source && <span class="rounded bg-nx-off-white px-2 py-0.5">{SOURCE_LABEL[obj.source] ?? obj.source}</span>}
+          {obj.added && <span class="ml-2">in libreria dal {fmtDate(obj.added)}</span>}
+          {obj.published && <span class="ml-2">· pubblicato {fmtDate(obj.published)}</span>}
+          {obj.price?.value && <span class="ml-2">· listino {obj.price.symbol}{obj.price.value}</span>}
+        </p>
+        <p class="mt-1 text-sm text-nx-gray-dark">
+          {files.length} file · {totalStl} STL · {fmtSize(obj.totalSize)}
+          {obj.categories?.length > 0 && <span> · {obj.categories.join(", ")}</span>}
+        </p>
+      </div>
+      <div class="flex shrink-0 flex-wrap gap-2">
+        {driveFolderUrl && (
+          <a href={driveFolderUrl} target="_blank" rel="noopener noreferrer" class="rounded-md bg-nx-cyan px-3 py-2 text-sm font-semibold text-white no-underline hover:bg-nx-blue">
+            Apri su Drive
+          </a>
+        )}
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-4 pb-8">
+    <div class="grid gap-6 md:grid-cols-5">
+      <div class="md:col-span-3">
+        {primary && (
+          <a href={r2(primary.key)} target="_blank" rel="noopener" class="block overflow-hidden rounded-xl border border-nx-gray-light/20 bg-nx-off-white">
+            <img src={r2(primary.key)} alt={obj.name} width="1200" height="1200" class="h-auto w-full" loading="eager" />
+          </a>
+        )}
+        {others.length > 0 && (
+          <div class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {others.map((im) => (
+              <a href={r2(im.key)} target="_blank" rel="noopener" class="block overflow-hidden rounded-lg border border-nx-gray-light/20 bg-nx-off-white" title={im.match ? `probabilmente: ${im.match}` : undefined}>
+                <img src={r2(im.thumb)} alt="" loading="lazy" decoding="async" width="480" height="480" class="aspect-square h-auto w-full object-cover" />
+                {im.match && <p class="truncate px-1.5 py-1 text-[10px] text-nx-gray-dark">{im.match}</p>}
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+      <div class="md:col-span-2">
+        {obj.description?.length > 0 && (
+          <div class="space-y-2 text-sm leading-relaxed text-nx-gray-dark">
+            {obj.description.map((p: string) => <p>{p}</p>)}
+          </div>
+        )}
+        {obj.tags?.length > 0 && (
+          <div class="mt-4 flex flex-wrap gap-1.5">
+            {obj.tags.map((t: string) => (
+              <a href={`${MMF_BASE}/?tag=${encodeURIComponent(t)}`} class="rounded-full border border-nx-gray-light/40 px-2.5 py-0.5 text-xs text-nx-gray-dark no-underline hover:border-nx-cyan hover:text-nx-cyan">{t}</a>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-4 pb-20">
+    <h2 class="text-xl font-bold text-nx-dark" style="font-family: var(--font-display);">File</h2>
+    <div class="mt-4 space-y-6">
+      {files.map((f: any) => {
+        const stl = f.entries.filter((e: any) => e.ext === "stl");
+        const other = f.entries.filter((e: any) => e.ext !== "stl");
+        const rendered = stl.filter((e: any) => e.render);
+        const notRendered = stl.filter((e: any) => !e.render);
+        return (
+          <article class="rounded-xl border border-nx-gray-light/20 bg-white p-4 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="min-w-0">
+                <p class="truncate font-semibold text-nx-dark">{f.name}</p>
+                <p class="text-xs text-nx-gray-dark">
+                  {fmtSize(f.size)} · {stl.length} STL{other.length > 0 && ` · ${other.length} altri file`}
+                  {f.skipped && <span class="ml-2 text-amber-700">non scaricato: {f.skipped}</span>}
+                </p>
+              </div>
+              {driveFileUrl(f.driveId) && (
+                <a href={driveFileUrl(f.driveId)} target="_blank" rel="noopener noreferrer" class="shrink-0 text-sm font-medium text-nx-cyan no-underline hover:underline">
+                  Scarica da Drive &rarr;
+                </a>
+              )}
+            </div>
+
+            {rendered.length > 0 && (
+              <div class="mt-4 space-y-4">
+                {groups(rendered).map(([dir, entries]) => (
+                  <div>
+                    {dir && <p class="mb-2 text-[11px] uppercase tracking-wider text-nx-gray-dark">{dir}/</p>}
+                    <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                      {entries.map((e: any) => {
+                        const img = (
+                          <img src={r2(e.render)} alt={baseName(e.path)} loading="lazy" decoding="async" width="560" height="560" class="aspect-square h-auto w-full object-contain" />
+                        );
+                        return (
+                          <div class="group relative rounded-lg border border-nx-gray-light/20 bg-nx-off-white p-1" title={e.path}>
+                            {e.mesh ? (
+                              <button type="button" data-mesh={r2(e.mesh)} data-mesh-title={`${obj.name} — ${baseName(e.path)}`}
+                                class="block w-full cursor-pointer appearance-none border-0 bg-transparent p-0" title="Ruota in 3D">
+                                {img}
+                              </button>
+                            ) : (
+                              <a href={r2(e.render)} target="_blank" rel="noopener" class="block no-underline">{img}</a>
+                            )}
+                            {e.mesh && (
+                              <a href={r2(e.render)} target="_blank" rel="noopener" title="Apri l'immagine"
+                                class="absolute right-1.5 top-1.5 rounded-md bg-white/85 p-1 text-nx-gray-dark opacity-0 shadow-sm transition hover:text-nx-dark focus:opacity-100 group-hover:opacity-100">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                                </svg>
+                              </a>
+                            )}
+                            <p class="mt-1 truncate text-[10px] leading-tight text-nx-dark" title={baseName(e.path)}>{baseName(e.path)}</p>
+                            <p class="text-[10px] text-nx-gray-dark">{fmtSize(e.size)}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {notRendered.length > 0 && (
+              <details class="mt-3">
+                <summary class="cursor-pointer text-sm text-nx-gray-dark">{notRendered.length} STL senza render</summary>
+                <ul class="mt-2 grid gap-x-4 gap-y-0.5 text-xs text-nx-gray-dark sm:grid-cols-2">
+                  {notRendered.map((e: any) => <li class="truncate" title={e.path}>{e.path} <span class="opacity-60">({fmtSize(e.size)})</span></li>)}
+                </ul>
+              </details>
+            )}
+            {other.length > 0 && (
+              <details class="mt-2">
+                <summary class="cursor-pointer text-sm text-nx-gray-dark">{other.length} altri file (lys, pdf, immagini…)</summary>
+                <ul class="mt-2 grid gap-x-4 gap-y-0.5 text-xs text-nx-gray-dark sm:grid-cols-2">
+                  {other.map((e: any) => <li class="truncate" title={e.path}>{e.path} <span class="opacity-60">({fmtSize(e.size)})</span></li>)}
+                </ul>
+              </details>
+            )}
+          </article>
+        );
+      })}
+    </div>
+    {skippedReasons.length > 0 && (
+      <p class="mt-6 text-xs text-nx-gray-dark">
+        Render non generati: {skippedReasons.map(([k, n]) => `${n} (${reasonLabel[k] ?? k})`).join(", ")}.
+      </p>
+    )}
+  </section>
+  <MmfViewer />
+</BaseLayout>

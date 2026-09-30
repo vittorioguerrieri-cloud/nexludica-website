@@ -26,6 +26,13 @@ export interface MemberDataRow {
   last_payment_amount: number | null;
   payment_notes: string | null;
   internal_notes: string | null;
+  citizenship: string | null;
+  termination_date: string | null;
+  termination_reason: string | null;
+  consent_privacy_at: number | null;
+  consent_statute_at: number | null;
+  consent_photo_publication_at: number | null;
+  consent_marketing_at: number | null;
   updated_at: number;
   updated_by: string | null;
 }
@@ -34,6 +41,8 @@ export interface AdminMemberView {
   // dati base
   id: string;
   email: string;
+  emailNexludica: string | null;
+  iban: string | null;
   name: string;
   role: Role;
   active: boolean;
@@ -63,13 +72,46 @@ export interface AdminMemberView {
   lastPaymentAmount: number | null;
   paymentNotes: string | null;
   internalNotes: string | null;
+  citizenship: string | null;
+  terminationDate: string | null;
+  terminationReason: string | null;
+  consentPrivacyAt: number | null;
+  consentStatuteAt: number | null;
+  consentPhotoPublicationAt: number | null;
+  consentMarketingAt: number | null;
+  /** Ruolo nel Consiglio Direttivo (NULL = non in direttivo). */
+  boardRole: "presidente" | "vice_presidente" | "segretario" | "tesoriere" | "consigliere" | null;
+}
+
+/**
+ * Normalizza la stringa "competenze" inviata da un form: accetta una lista
+ * separata da virgole (input naturale, "Psicometria, Game design"), pulisce
+ * gli spazi e produce la forma di storage standardizzata con separatore " · "
+ * (lo stesso usato sulla pagina pubblica "Chi siamo").
+ *
+ * Accetta anche input gia' nella forma " · " (idempotente).
+ *
+ * Esempi:
+ *   "Psicometria, Game design, Lavoro sociale" → "Psicometria · Game design · Lavoro sociale"
+ *   "Psicometria , , Game design"              → "Psicometria · Game design"
+ *   "Psicometria · Game design"                → "Psicometria · Game design"
+ *   ""                                          → ""
+ */
+export function normalizeSkills(input: string | undefined | null): string {
+  if (input == null) return "";
+  return input
+    .replace(/·|•/g, ",") // bullet/middot → virgola, poi ri-split
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export async function listAllMembers(db: D1Database): Promise<AdminMemberView[]> {
   const rs = await db
     .prepare(
       `SELECT
-        u.id, u.email, u.name, u.role, u.active, u.created_at, u.last_login_at,
+        u.id, u.email, u.name, u.role, u.active, u.board_role, u.created_at, u.last_login_at,
         p.display_name, p.role_label, p.bio, p.skills, p.photo_url,
         p.public_visible, p.email_public,
         m.fiscal_code, m.birth_date, m.birth_place, m.phone,
@@ -77,7 +119,10 @@ export async function listAllMembers(db: D1Database): Promise<AdminMemberView[]>
         m.membership_date,
         COALESCE(m.membership_status, 'active') as membership_status,
         m.last_payment_date, m.last_payment_amount, m.payment_notes,
-        m.internal_notes
+        m.internal_notes,
+        m.citizenship, m.termination_date, m.termination_reason,
+        m.consent_privacy_at, m.consent_statute_at,
+        m.consent_photo_publication_at, m.consent_marketing_at
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        LEFT JOIN member_data m ON m.user_id = u.id
@@ -94,15 +139,19 @@ export async function getMemberById(
   const r = await db
     .prepare(
       `SELECT
-        u.id, u.email, u.name, u.role, u.active, u.created_at, u.last_login_at,
+        u.id, u.email, u.name, u.role, u.active, u.board_role, u.created_at, u.last_login_at,
+        u.email_nexludica,
         p.display_name, p.role_label, p.bio, p.skills, p.photo_url,
         p.public_visible, p.email_public,
         m.fiscal_code, m.birth_date, m.birth_place, m.phone,
-        m.address, m.city, m.postal_code, m.province, m.country,
+        m.address, m.city, m.postal_code, m.province, m.country, m.iban,
         m.membership_date,
         COALESCE(m.membership_status, 'active') as membership_status,
         m.last_payment_date, m.last_payment_amount, m.payment_notes,
-        m.internal_notes
+        m.internal_notes,
+        m.citizenship, m.termination_date, m.termination_reason,
+        m.consent_privacy_at, m.consent_statute_at,
+        m.consent_photo_publication_at, m.consent_marketing_at
        FROM users u
        LEFT JOIN profiles p ON p.user_id = u.id
        LEFT JOIN member_data m ON m.user_id = u.id
@@ -119,6 +168,8 @@ function rowToMember(r: Record<string, unknown>): AdminMemberView {
   return {
     id: String(r.id),
     email: String(r.email),
+    emailNexludica: str("email_nexludica"),
+    iban: str("iban"),
     name: String(r.name),
     role: (r.role as Role) ?? "member",
     active: Boolean(r.active),
@@ -146,6 +197,14 @@ function rowToMember(r: Record<string, unknown>): AdminMemberView {
     lastPaymentAmount: r.last_payment_amount != null ? Number(r.last_payment_amount) : null,
     paymentNotes: str("payment_notes"),
     internalNotes: str("internal_notes"),
+    citizenship: str("citizenship"),
+    terminationDate: str("termination_date"),
+    terminationReason: str("termination_reason"),
+    consentPrivacyAt: r.consent_privacy_at != null ? Number(r.consent_privacy_at) : null,
+    consentStatuteAt: r.consent_statute_at != null ? Number(r.consent_statute_at) : null,
+    consentPhotoPublicationAt: r.consent_photo_publication_at != null ? Number(r.consent_photo_publication_at) : null,
+    consentMarketingAt: r.consent_marketing_at != null ? Number(r.consent_marketing_at) : null,
+    boardRole: (r.board_role as AdminMemberView["boardRole"]) ?? null,
   };
 }
 
@@ -153,6 +212,8 @@ export interface UpdateMemberInput {
   // user
   role?: Role;
   active?: boolean;
+  /** Ruolo nel Consiglio Direttivo (NULL = non in direttivo). */
+  boardRole?: "presidente" | "vice_presidente" | "segretario" | "tesoriere" | "consigliere" | null;
   // profile
   roleLabel?: string;
   publicVisible?: boolean;
@@ -173,6 +234,21 @@ export interface UpdateMemberInput {
   lastPaymentAmount?: number | null;
   paymentNotes?: string;
   internalNotes?: string;
+  // GDPR / CTS estesi
+  citizenship?: string;
+  terminationDate?: string;
+  terminationReason?: string;
+  consentPrivacyAt?: number | null;
+  consentStatuteAt?: number | null;
+  consentPhotoPublicationAt?: number | null;
+  consentMarketingAt?: number | null;
+  // profilo pubblico
+  displayName?: string;
+  bio?: string;
+  skills?: string;
+  photoUrl?: string;
+  website?: string;
+  instagram?: string;
 }
 
 export async function updateMemberAsAdmin(
@@ -202,6 +278,10 @@ export async function updateMemberAsAdmin(
   if (input.active !== undefined) {
     userSets.push("active = ?");
     userVals.push(input.active ? 1 : 0);
+  }
+  if (input.boardRole !== undefined) {
+    userSets.push("board_role = ?");
+    userVals.push(input.boardRole);
   }
   if (userSets.length > 0) {
     userVals.push(userId);
@@ -251,12 +331,42 @@ export async function updateMemberAsAdmin(
       .run();
   }
 
+  // 2b) Update altri campi profilo opzionali (displayName, bio, skills,
+  //     photoUrl, website, instagram)
+  const profileExtra: Array<{ col: string; val: unknown }> = [];
+  if (input.displayName !== undefined) profileExtra.push({ col: "display_name", val: trim(input.displayName, 80) });
+  if (input.bio !== undefined) profileExtra.push({ col: "bio", val: trim(input.bio, 1000) });
+  if (input.skills !== undefined) profileExtra.push({ col: "skills", val: trim(input.skills, 400) });
+  if (input.photoUrl !== undefined) profileExtra.push({ col: "photo_url", val: trim(input.photoUrl, 500) });
+  if (input.website !== undefined) profileExtra.push({ col: "website", val: trim(input.website, 300) });
+  if (input.instagram !== undefined) profileExtra.push({ col: "instagram", val: trim(input.instagram, 300) });
+  if (profileExtra.length > 0) {
+    await db
+      .prepare(
+        `INSERT INTO profiles (user_id, display_name, public_visible, email_public, sort_order, updated_at)
+         VALUES (?, (SELECT name FROM users WHERE id = ?), 1, 0, 100, ?)
+         ON CONFLICT(user_id) DO NOTHING`,
+      )
+      .bind(userId, userId, now())
+      .run();
+    const sets = profileExtra.map((p) => `${p.col} = ?`).join(", ");
+    const vals = profileExtra.map((p) => p.val);
+    vals.push(now(), userId);
+    await db
+      .prepare(`UPDATE profiles SET ${sets}, updated_at = ? WHERE user_id = ?`)
+      .bind(...vals)
+      .run();
+  }
+
   // 3) Upsert member_data se almeno un campo e' fornito
   const mdKeys: Array<keyof UpdateMemberInput> = [
     "fiscalCode", "birthDate", "birthPlace", "phone",
     "address", "city", "postalCode", "province", "country",
     "membershipDate", "membershipStatus",
     "lastPaymentDate", "lastPaymentAmount", "paymentNotes", "internalNotes",
+    "citizenship", "terminationDate", "terminationReason",
+    "consentPrivacyAt", "consentStatuteAt",
+    "consentPhotoPublicationAt", "consentMarketingAt",
   ];
   const hasMd = mdKeys.some((k) => input[k] !== undefined);
   if (hasMd) {
@@ -267,8 +377,12 @@ export async function updateMemberAsAdmin(
            address, city, postal_code, province, country,
            membership_date, membership_status,
            last_payment_date, last_payment_amount, payment_notes,
-           internal_notes, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           internal_notes,
+           citizenship, termination_date, termination_reason,
+           consent_privacy_at, consent_statute_at,
+           consent_photo_publication_at, consent_marketing_at,
+           updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET
            fiscal_code = COALESCE(excluded.fiscal_code, fiscal_code),
            birth_date = COALESCE(excluded.birth_date, birth_date),
@@ -285,6 +399,13 @@ export async function updateMemberAsAdmin(
            last_payment_amount = COALESCE(excluded.last_payment_amount, last_payment_amount),
            payment_notes = COALESCE(excluded.payment_notes, payment_notes),
            internal_notes = COALESCE(excluded.internal_notes, internal_notes),
+           citizenship = COALESCE(excluded.citizenship, citizenship),
+           termination_date = COALESCE(excluded.termination_date, termination_date),
+           termination_reason = COALESCE(excluded.termination_reason, termination_reason),
+           consent_privacy_at = COALESCE(excluded.consent_privacy_at, consent_privacy_at),
+           consent_statute_at = COALESCE(excluded.consent_statute_at, consent_statute_at),
+           consent_photo_publication_at = COALESCE(excluded.consent_photo_publication_at, consent_photo_publication_at),
+           consent_marketing_at = COALESCE(excluded.consent_marketing_at, consent_marketing_at),
            updated_at = excluded.updated_at,
            updated_by = excluded.updated_by`,
       )
@@ -305,6 +426,13 @@ export async function updateMemberAsAdmin(
         input.lastPaymentAmount ?? null,
         trim(input.paymentNotes, 500),
         trim(input.internalNotes, 1000),
+        trim(input.citizenship, 60),
+        trim(input.terminationDate, 10),
+        trim(input.terminationReason, 300),
+        input.consentPrivacyAt ?? null,
+        input.consentStatuteAt ?? null,
+        input.consentPhotoPublicationAt ?? null,
+        input.consentMarketingAt ?? null,
         now(),
         adminUserId,
       )

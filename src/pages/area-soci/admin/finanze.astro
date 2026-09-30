@@ -1,0 +1,576 @@
+---
+/**
+ * Bilancio e fondi (solo admin).
+ *  - Import dell'export bancario (.zip)
+ *  - Dashboard: saldo, entrate/uscite, residui per progetto
+ *  - Progetti/ambiti a cui attribuire le transazioni
+ *  - Tabella transazioni con assegnazione progetto + esclusione
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { getDashboard, listProjects, listTransactions } from "../../../server/finance";
+import { receiptsByTransaction } from "../../../server/finance-receipts";
+import { listMissionsWithTotals, MISSION_CATEGORIES } from "../../../server/missions";
+import { listOpportunities } from "../../../server/opportunities";
+
+export const prerender = false;
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+if (user.role !== "admin") return Astro.redirect("/area-soci");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+const dashboard = db ? await getDashboard(db) : null;
+const projects = db ? await listProjects(db) : [];
+const transactions = db ? await listTransactions(db) : [];
+const receipts = db ? await receiptsByTransaction(db) : {};
+const missions = db ? await listMissionsWithTotals(db) : [];
+const opportunities = db ? await listOpportunities(db) : [];
+const linkableOpps = opportunities.filter((o) => !o.archived);
+
+const eur = (n: number) => new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" }).format(n);
+function fmtDate(iso: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+const kindLabel: Record<string, string> = { progetto: "Progetto", ambito: "Ambito", iniziativa: "Iniziativa" };
+const activeProjects = projects.filter((p) => !p.archived);
+const activeMissions = missions.filter((m) => !m.archived);
+---
+
+<AreaSociLayout title="Bilancio e fondi — Amministrazione" active="finanze">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 class="text-2xl font-bold text-nx-dark">Bilancio e fondi</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Importa l'export della banca, attribuisci entrate/uscite a progetti o ambiti e tieni d'occhio i fondi residui.
+      </p>
+    </div>
+    <a href="/api/admin/finance/report" target="_blank" rel="noopener noreferrer"
+       class="shrink-0 rounded-lg bg-nx-dark px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white no-underline shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue-deep">
+      ↓ Genera report PDF
+    </a>
+  </div>
+
+  <!-- Tab switcher -->
+  <div class="mt-6 flex flex-wrap gap-1 border-b border-nx-gray-light/30">
+    <button type="button" data-tab="dashboard" class="nx-tab nx-tab-active rounded-t-md border-b-2 border-nx-cyan px-4 py-2 text-sm font-semibold text-nx-cyan">Dashboard</button>
+    <button type="button" data-tab="txns" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">Transazioni <span class="ml-1 text-xs">({transactions.length})</span></button>
+    <button type="button" data-tab="projects" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">Progetti <span class="ml-1 text-xs">({projects.length})</span></button>
+    <button type="button" data-tab="missions" class="nx-tab rounded-t-md border-b-2 border-transparent px-4 py-2 text-sm font-semibold text-nx-gray-dark hover:text-nx-dark">Missioni <span class="ml-1 text-xs">({missions.length})</span></button>
+  </div>
+
+  <!-- ============ DASHBOARD ============ -->
+  <section data-panel="dashboard" class="nx-panel mt-6 space-y-6">
+    <!-- Import -->
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Aggiorna dall'export della banca</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Carica lo <strong>.zip</strong> esportato dall'app (contiene movimenti conto + carta). L'import è ripetibile: i movimenti già presenti non vengono duplicati. Le righe "Contabilizzazione carta" sul conto vengono escluse in automatico per non contare due volte le spese.
+      </p>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <input type="file" id="import-file" accept=".zip,application/zip" class="block text-sm text-nx-dark file:mr-3 file:rounded-md file:border-0 file:bg-nx-cyan file:px-4 file:py-2 file:text-xs file:font-bold file:uppercase file:tracking-wider file:text-white" />
+        <button type="button" id="import-btn" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">Importa</button>
+        <span id="import-status" class="text-xs"></span>
+      </div>
+    </div>
+
+    {dashboard && (
+      <>
+        <!-- KPI -->
+        <section class="grid gap-3 sm:grid-cols-4">
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Saldo disponibile</p>
+            <p class={`mt-1 text-2xl font-black ${dashboard.balance >= 0 ? "text-nx-cyan" : "text-red-600"}`}>{eur(dashboard.balance)}</p>
+            <p class="text-[10px] text-nx-gray-dark">spese carta già impegnate incluse</p>
+          </div>
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Entrate totali</p>
+            <p class="mt-1 text-2xl font-black text-emerald-600">{eur(dashboard.totalIn)}</p>
+          </div>
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Uscite totali</p>
+            <p class="mt-1 text-2xl font-black text-red-600">{eur(dashboard.totalOut)}</p>
+          </div>
+          <div class="rounded-lg bg-nx-off-white p-4">
+            <p class="text-[10px] uppercase text-nx-gray-dark">Transazioni</p>
+            <p class="mt-1 text-2xl font-black text-nx-dark">{dashboard.txnCount}</p>
+            <p class="text-[10px] text-nx-gray-dark">{dashboard.unattributedCount} da attribuire</p>
+          </div>
+        </section>
+
+        <!-- Per progetto -->
+        <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+          <div class="border-b border-nx-gray-light/20 px-6 py-4">
+            <h3 class="text-base font-bold text-nx-dark">Fondi per progetto / ambito</h3>
+            <p class="text-xs text-nx-gray-dark">Residuo = entrate − uscite attribuite a quel progetto.</p>
+          </div>
+          {dashboard.perProject.length === 0 ? (
+            <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessuna transazione. Importa l'export per iniziare.</p>
+          ) : (
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+                  <tr>
+                    <th class="px-4 py-3 text-left">Progetto / ambito</th>
+                    <th class="px-4 py-3 text-right">Entrate</th>
+                    <th class="px-4 py-3 text-right">Uscite</th>
+                    <th class="px-4 py-3 text-right">Residuo</th>
+                    <th class="px-4 py-3 text-right">Mov.</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-nx-gray-light/20">
+                  {dashboard.perProject.map((r) => (
+                    <tr class={!r.project ? "bg-amber-50" : ""}>
+                      <td class="px-4 py-3">
+                        {r.project ? (
+                          <span class="font-medium text-nx-dark">
+                            {r.project.color && <span class="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle" style={`background:${r.project.color}`}></span>}
+                            {r.project.name}
+                            <span class="ml-2 rounded-full bg-nx-gray-light/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-nx-gray-dark">{kindLabel[r.project.kind]}</span>
+                          </span>
+                        ) : (
+                          <span class="italic text-amber-700">Non attribuito</span>
+                        )}
+                      </td>
+                      <td class="px-4 py-3 text-right font-mono text-emerald-600">{eur(r.in)}</td>
+                      <td class="px-4 py-3 text-right font-mono text-red-600">{eur(r.out)}</td>
+                      <td class={`px-4 py-3 text-right font-mono font-bold ${r.net >= 0 ? "text-nx-dark" : "text-red-600"}`}>{eur(r.net)}</td>
+                      <td class="px-4 py-3 text-right text-nx-gray-dark">{r.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </>
+    )}
+  </section>
+
+  <!-- ============ TRANSAZIONI ============ -->
+  <section data-panel="txns" class="nx-panel mt-6 hidden space-y-4">
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      <span class="font-semibold uppercase tracking-wider text-nx-gray-dark">Filtra:</span>
+      <button type="button" data-filter="all" class="nx-filter rounded-full bg-nx-cyan px-3 py-1 font-semibold text-white">Tutte</button>
+      <button type="button" data-filter="unattr" class="nx-filter rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Da attribuire</button>
+      <button type="button" data-filter="in" class="nx-filter rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Entrate</button>
+      <button type="button" data-filter="out" class="nx-filter rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Uscite</button>
+      <button type="button" data-filter="excluded" class="nx-filter rounded-full border border-nx-gray-light/40 px-3 py-1 font-semibold text-nx-gray-dark hover:bg-nx-off-white">Escluse</button>
+    </div>
+    <div class="overflow-x-auto rounded-xl border border-nx-gray-light/30 bg-white">
+      <table class="w-full text-sm">
+        <thead class="bg-nx-off-white text-xs uppercase tracking-wider text-nx-gray-dark">
+          <tr>
+            <th class="px-3 py-3 text-left">Data</th>
+            <th class="px-3 py-3 text-left">Descrizione</th>
+            <th class="px-3 py-3 text-right">Importo</th>
+            <th class="px-3 py-3 text-left">Progetto / ambito</th>
+            <th class="px-3 py-3 text-left">Missione</th>
+            <th class="px-3 py-3 text-left">Categoria</th>
+            <th class="px-3 py-3 text-left">Ricevute</th>
+            <th class="px-3 py-3 text-center">Escl.</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-nx-gray-light/20">
+          {transactions.map((t) => (
+            <tr data-txn-row data-txn-id={t.id}
+                data-amount={t.amount} data-excluded={t.excluded ? "1" : "0"} data-project={t.projectId ?? ""} data-mission={t.missionId ?? ""}
+                class={t.excluded ? "opacity-50" : ""}>
+              <td class="whitespace-nowrap px-3 py-2 text-xs text-nx-gray-dark">{fmtDate(t.opDate)}</td>
+              <td class="px-3 py-2">
+                <span class="text-nx-dark">{t.description || t.counterparty || "—"}</span>
+                <span class="ml-1 rounded bg-nx-gray-light/20 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-nx-gray-dark">{t.source}</span>
+                {t.counterparty && t.description && t.counterparty !== t.description && (
+                  <span class="block text-[11px] text-nx-gray-dark">{t.counterparty}</span>
+                )}
+              </td>
+              <td class={`whitespace-nowrap px-3 py-2 text-right font-mono ${t.amount >= 0 ? "text-emerald-600" : "text-red-600"}`}>{eur(t.amount)}</td>
+              <td class="px-3 py-2">
+                <select data-txn-project data-id={t.id} class="w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs">
+                  <option value="">— non attribuito —</option>
+                  {activeProjects.map((p) => (
+                    <option value={p.id} selected={t.projectId === p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </td>
+              <td class="px-3 py-2">
+                <select data-txn-mission data-id={t.id} class="w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs">
+                  <option value="">— nessuna —</option>
+                  {activeMissions.map((m) => (
+                    <option value={m.id} selected={t.missionId === m.id}>{m.title}</option>
+                  ))}
+                </select>
+              </td>
+              <td class="px-3 py-2">
+                <select data-txn-category data-id={t.id} class="w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs">
+                  <option value="">—</option>
+                  {MISSION_CATEGORIES.map((c) => (
+                    <option value={c} selected={t.category === c}>{c}</option>
+                  ))}
+                </select>
+              </td>
+              <td class="px-3 py-2">
+                <div class="flex flex-col gap-1">
+                  {(receipts[t.id] ?? []).map((r) => (
+                    <span class="flex items-center gap-1 whitespace-nowrap text-[11px]">
+                      <a href={`/api/admin/finance/receipts/${r.id}`} target="_blank" rel="noopener" class="max-w-[9rem] truncate text-nx-cyan underline" title={r.filename}>{r.filename}</a>
+                      <button type="button" data-receipt-delete={r.id} class="text-nx-gray-dark hover:text-red-600" title="Elimina la ricevuta" aria-label="Elimina la ricevuta">×</button>
+                    </span>
+                  ))}
+                  <label class="w-fit cursor-pointer rounded border border-nx-gray-light/50 px-2 py-0.5 text-[11px] font-semibold text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">
+                    Allega
+                    <input type="file" data-receipt-upload data-id={t.id} accept="application/pdf,image/jpeg,image/png,image/webp" class="hidden" />
+                  </label>
+                </div>
+              </td>
+              <td class="px-3 py-2 text-center">
+                <input type="checkbox" data-txn-excluded data-id={t.id} checked={t.excluded}
+                       class="h-4 w-4 rounded border-nx-gray-light/40 text-nx-cyan" title="Escludi dal conteggio" />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    {transactions.length === 0 && (
+      <p class="rounded-xl border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">Nessuna transazione importata.</p>
+    )}
+  </section>
+
+  <!-- ============ PROGETTI ============ -->
+  <section data-panel="projects" class="nx-panel mt-6 space-y-6 hidden">
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Nuovo progetto / ambito</h3>
+      <form id="project-form" class="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
+        <input name="name" required maxlength="120" placeholder="Nome (es. Wanderer's Quest, Progetto Pink)" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        <select name="kind" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm">
+          <option value="progetto">Progetto</option>
+          <option value="ambito">Ambito</option>
+          <option value="iniziativa">Iniziativa</option>
+        </select>
+        <input name="color" type="color" value="#05abc4" class="h-10 w-14 rounded-lg border border-nx-gray-light/40 bg-white" title="Colore" />
+        <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue">Crea</button>
+      </form>
+      <span id="project-status" class="mt-2 block text-xs"></span>
+    </div>
+
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="border-b border-nx-gray-light/20 px-6 py-4"><h3 class="text-base font-bold text-nx-dark">Progetti ({projects.length})</h3></div>
+      {projects.length === 0 ? (
+        <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessun progetto. Creane uno per attribuire le transazioni.</p>
+      ) : (
+        <div class="divide-y divide-nx-gray-light/20">
+          {projects.map((p) => (
+            <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-3" data-proj-row data-proj-id={p.id}>
+              <div class="flex items-center gap-2">
+                {p.color && <span class="inline-block h-3 w-3 rounded-full" style={`background:${p.color}`}></span>}
+                <span class="font-medium text-nx-dark">{p.name}</span>
+                <span class="rounded-full bg-nx-gray-light/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-nx-gray-dark">{kindLabel[p.kind]}</span>
+                {p.archived && <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-700">archiviato</span>}
+              </div>
+              <div class="flex gap-2 text-xs">
+                <button type="button" data-proj-archive={p.id} data-archived={p.archived ? "1" : "0"} class="rounded border border-nx-gray-light/40 px-2 py-1 text-nx-blue hover:bg-nx-cyan-light/20">{p.archived ? "Riattiva" : "Archivia"}</button>
+                <button type="button" data-proj-delete={p.id} class="rounded border border-red-200 px-2 py-1 text-red-600 hover:bg-red-50">Elimina</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- ============ MISSIONI ============ -->
+  <section data-panel="missions" class="nx-panel mt-6 space-y-6 hidden">
+    <div class="rounded-xl border border-nx-cyan/30 bg-nx-cyan-light/20 p-6">
+      <h3 class="text-base font-bold text-nx-dark">Nuova missione / trasferta</h3>
+      <p class="mt-1 text-xs text-nx-gray-dark">
+        Una missione raggruppa la spesa di una trasferta o di un evento (es. TOplay, FederLudoCon). Dopo averla creata, assegna le transazioni alla missione dalla scheda Transazioni.
+      </p>
+      <form id="mission-form" class="mt-3 grid gap-3 sm:grid-cols-2">
+        <input name="title" required maxlength="160" placeholder="Titolo (es. TOplay 2026)" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm sm:col-span-2" />
+        <select name="opportunityId" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm sm:col-span-2">
+          <option value="">— collega un evento dal calendario (opzionale) —</option>
+          {linkableOpps.map((o) => (
+            <option value={o.id}>{o.title}{o.eventDate ? ` (${fmtDate(o.eventDate)})` : ""}</option>
+          ))}
+        </select>
+        <label class="text-xs text-nx-gray-dark">Dal<input name="startDate" type="date" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <label class="text-xs text-nx-gray-dark">Al<input name="endDate" type="date" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" /></label>
+        <input name="location" maxlength="160" placeholder="Luogo" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        <input name="budgetEur" type="number" step="0.01" min="0" placeholder="Budget € (preventivo, opzionale)" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-2 text-sm" />
+        <button type="submit" class="rounded-lg bg-nx-cyan px-5 py-2 text-xs font-bold uppercase tracking-wider text-white hover:bg-nx-blue sm:col-span-2 sm:w-auto sm:justify-self-start">Crea missione</button>
+      </form>
+      <span id="mission-status" class="mt-2 block text-xs"></span>
+    </div>
+
+    <div class="rounded-xl border border-nx-gray-light/30 bg-white">
+      <div class="border-b border-nx-gray-light/20 px-6 py-4"><h3 class="text-base font-bold text-nx-dark">Missioni ({missions.length})</h3></div>
+      {missions.length === 0 ? (
+        <p class="px-6 py-8 text-center text-sm text-nx-gray-dark">Nessuna missione. Creane una per tracciare la spesa di una trasferta.</p>
+      ) : (
+        <div class="divide-y divide-nx-gray-light/20">
+          {missions.map((m) => {
+            const overBudget = m.budgetEur != null && m.spent > m.budgetEur;
+            const pct = m.budgetEur != null && m.budgetEur > 0 ? Math.min(100, Math.round((m.spent / m.budgetEur) * 100)) : null;
+            return (
+              <div class="px-6 py-3" data-mission-row data-mission-id={m.id}>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <a href={`/area-soci/admin/finanze/missioni/${m.id}`} class="font-semibold text-nx-dark no-underline hover:text-nx-cyan">{m.title}</a>
+                    {m.status === "conclusa" && <span class="ml-2 rounded-full bg-nx-gray-light/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-nx-gray-dark">conclusa</span>}
+                    {m.archived && <span class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] uppercase tracking-wider text-amber-700">archiviata</span>}
+                    <div class="text-[11px] text-nx-gray-dark">
+                      {[m.location, m.startDate ? fmtDate(m.startDate) + (m.endDate && m.endDate !== m.startDate ? "–" + fmtDate(m.endDate) : "") : null].filter(Boolean).join(" · ") || "—"}
+                      <span class="ml-1">· {m.count} mov.</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-4 text-right">
+                    <div>
+                      <p class="text-[10px] uppercase text-nx-gray-dark">Speso</p>
+                      <p class={`font-mono font-bold ${overBudget ? "text-red-600" : "text-nx-dark"}`}>{eur(m.spent)}</p>
+                    </div>
+                    {m.budgetEur != null && (
+                      <div>
+                        <p class="text-[10px] uppercase text-nx-gray-dark">Budget</p>
+                        <p class="font-mono text-nx-gray-dark">{eur(m.budgetEur)}</p>
+                      </div>
+                    )}
+                    <div class="flex gap-2 text-xs">
+                      <a href={`/area-soci/admin/finanze/missioni/${m.id}`} class="rounded border border-nx-gray-light/40 px-2 py-1 text-nx-blue no-underline hover:bg-nx-cyan-light/20">Dettaglio</a>
+                      <button type="button" data-mission-archive={m.id} data-archived={m.archived ? "1" : "0"} class="rounded border border-nx-gray-light/40 px-2 py-1 text-nx-blue hover:bg-nx-cyan-light/20">{m.archived ? "Riattiva" : "Archivia"}</button>
+                      <button type="button" data-mission-delete={m.id} class="rounded border border-red-200 px-2 py-1 text-red-600 hover:bg-red-50">Elimina</button>
+                    </div>
+                  </div>
+                </div>
+                {pct != null && (
+                  <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-nx-gray-light/20">
+                    <div class={`h-full ${overBudget ? "bg-red-500" : "bg-nx-cyan"}`} style={`width:${pct}%`}></div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+</AreaSociLayout>
+
+<!--
+  L'export della banca contiene i giustificativi (foto da qualche MB l'una),
+  ma l'import usa solo i CSV. Qui teniamo i soli CSV prima di caricare: si
+  passa da decine di MB a pochi KB, senza far transitare allegati inutili.
+-->
+<script>
+  import { unzipSync, zipSync } from "fflate";
+  window.__soloCsvDalloZip = function (bytes) {
+    const soloCsv = unzipSync(bytes, { filter: (f) => /\.csv$/i.test(f.name) });
+    if (Object.keys(soloCsv).length === 0) return null;
+    return zipSync(soloCsv);
+  };
+</script>
+
+<script is:inline>
+  (function () {
+    // Tabs
+    const tabs = document.querySelectorAll(".nx-tab");
+    const panels = document.querySelectorAll(".nx-panel");
+    tabs.forEach((t) => t.addEventListener("click", () => {
+      tabs.forEach((x) => { x.classList.remove("nx-tab-active", "border-nx-cyan", "text-nx-cyan"); x.classList.add("border-transparent", "text-nx-gray-dark"); });
+      t.classList.remove("border-transparent", "text-nx-gray-dark");
+      t.classList.add("nx-tab-active", "border-nx-cyan", "text-nx-cyan");
+      const key = t.getAttribute("data-tab");
+      panels.forEach((p) => p.classList.toggle("hidden", p.getAttribute("data-panel") !== key));
+    }));
+
+    // Import
+    const impFile = document.getElementById("import-file");
+    const impBtn = document.getElementById("import-btn");
+    const impStatus = document.getElementById("import-status");
+    impBtn?.addEventListener("click", async () => {
+      const f = impFile && impFile.files && impFile.files[0];
+      if (!f) { impStatus.textContent = "Seleziona un file .zip"; impStatus.className = "text-xs text-red-600"; return; }
+      impBtn.disabled = true;
+      impStatus.textContent = "Import in corso…"; impStatus.className = "text-xs text-nx-gray-dark";
+
+      // Tiene solo i CSV: gli allegati non servono all'import e pesano molto.
+      let daInviare = f;
+      if (window.__soloCsvDalloZip && /\.zip$/i.test(f.name)) {
+        try {
+          impStatus.textContent = "Estrazione dei movimenti…";
+          const ridotto = window.__soloCsvDalloZip(new Uint8Array(await f.arrayBuffer()));
+          if (ridotto && ridotto.length < f.size) {
+            daInviare = new File([ridotto], f.name, { type: "application/zip" });
+            const da = (f.size / 1048576).toFixed(1), a = (ridotto.length / 1024).toFixed(0);
+            impStatus.textContent = "Movimenti estratti (" + da + " MB -> " + a + " KB), invio…";
+          }
+        } catch (e) {
+          // Se l'estrazione fallisce si invia comunque l'originale.
+        }
+      }
+      const fd = new FormData(); fd.append("file", daInviare);
+      try {
+        const res = await fetch("/api/admin/finance/import", { method: "POST", body: fd });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { impStatus.textContent = "✗ " + (d.error || res.status); impStatus.className = "text-xs text-red-600"; impBtn.disabled = false; return; }
+        let msg = `✓ Importate ${d.added} (${d.addedConto} conto, ${d.addedCarta} carta), ${d.skipped} già presenti.`;
+        if (d.declaredBalance != null) {
+          const diff = Math.round((d.computedBalance - d.declaredBalance) * 100) / 100;
+          msg += ` Saldo calcolato ${d.computedBalance}€ vs banca ${d.declaredBalance}€` + (Math.abs(diff) < 0.01 ? " ✓" : ` (scarto ${diff}€)`);
+        }
+        impStatus.textContent = msg; impStatus.className = "text-xs font-semibold text-emerald-600";
+        setTimeout(() => location.reload(), 2500);
+      } catch (e) { impStatus.textContent = "Errore di rete"; impStatus.className = "text-xs text-red-600"; impBtn.disabled = false; }
+    });
+
+    // Ricevute: caricamento ed eliminazione (ricarica la pagina a operazione fatta)
+    document.querySelectorAll("[data-receipt-upload]").forEach((inp) => {
+      inp.addEventListener("change", async () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        const label = inp.parentElement;
+        label.firstChild.textContent = "Caricamento…";
+        const fd = new FormData();
+        fd.append("transactionId", inp.dataset.id);
+        fd.append("file", f);
+        try {
+          const res = await fetch("/api/admin/finance/receipts", { method: "POST", body: fd });
+          const d = await res.json();
+          if (!res.ok || !d.ok) { alert("Ricevuta non caricata: " + (d.error || res.status)); label.firstChild.textContent = "Allega"; return; }
+          location.reload();
+        } catch (e) { alert("Errore di rete"); label.firstChild.textContent = "Allega"; }
+      });
+    });
+    document.querySelectorAll("[data-receipt-delete]").forEach((b) => {
+      b.addEventListener("click", async () => {
+        if (!confirm("Eliminare questa ricevuta? Il file viene cancellato.")) return;
+        const res = await fetch("/api/admin/finance/receipts/" + encodeURIComponent(b.dataset.receiptDelete), { method: "DELETE" });
+        if (res.ok) location.reload(); else alert("Eliminazione non riuscita");
+      });
+    });
+
+    // Transazioni: assegna progetto / escludi
+    async function patchTxn(id, payload) {
+      try { const res = await fetch("/api/admin/finance/transactions?id=" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); return await res.json(); }
+      catch (e) { return { ok: false }; }
+    }
+    document.querySelectorAll("[data-txn-project]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchTxn(id, { projectId: sel.value || null });
+        const row = document.querySelector(`[data-txn-row][data-txn-id="${id}"]`);
+        if (r && r.ok && row) { row.setAttribute("data-project", sel.value || ""); sel.classList.add("ring-1", "ring-emerald-400"); setTimeout(() => sel.classList.remove("ring-1", "ring-emerald-400"), 800); }
+      });
+    });
+    document.querySelectorAll("[data-txn-excluded]").forEach((chk) => {
+      chk.addEventListener("change", async () => {
+        const id = chk.getAttribute("data-id");
+        const r = await patchTxn(id, { excluded: chk.checked });
+        const row = document.querySelector(`[data-txn-row][data-txn-id="${id}"]`);
+        if (r && r.ok && row) { row.setAttribute("data-excluded", chk.checked ? "1" : "0"); row.classList.toggle("opacity-50", chk.checked); }
+      });
+    });
+    document.querySelectorAll("[data-txn-mission]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchTxn(id, { missionId: sel.value || null });
+        const row = document.querySelector(`[data-txn-row][data-txn-id="${id}"]`);
+        if (r && r.ok && row) { row.setAttribute("data-mission", sel.value || ""); sel.classList.add("ring-1", "ring-emerald-400"); setTimeout(() => sel.classList.remove("ring-1", "ring-emerald-400"), 800); }
+      });
+    });
+    document.querySelectorAll("[data-txn-category]").forEach((sel) => {
+      sel.addEventListener("change", async () => {
+        const id = sel.getAttribute("data-id");
+        const r = await patchTxn(id, { category: sel.value || null });
+        if (r && r.ok) { sel.classList.add("ring-1", "ring-emerald-400"); setTimeout(() => sel.classList.remove("ring-1", "ring-emerald-400"), 800); }
+      });
+    });
+
+    // Filtri transazioni
+    const filterBtns = document.querySelectorAll(".nx-filter");
+    filterBtns.forEach((b) => b.addEventListener("click", () => {
+      filterBtns.forEach((x) => { x.classList.remove("bg-nx-cyan", "text-white"); x.classList.add("border", "border-nx-gray-light/40", "text-nx-gray-dark"); });
+      b.classList.add("bg-nx-cyan", "text-white"); b.classList.remove("border", "border-nx-gray-light/40", "text-nx-gray-dark");
+      const f = b.getAttribute("data-filter");
+      document.querySelectorAll("[data-txn-row]").forEach((row) => {
+        const amt = parseFloat(row.getAttribute("data-amount") || "0");
+        const excl = row.getAttribute("data-excluded") === "1";
+        const proj = row.getAttribute("data-project");
+        let show = true;
+        if (f === "unattr") show = !proj && !excl;
+        else if (f === "in") show = amt > 0;
+        else if (f === "out") show = amt < 0;
+        else if (f === "excluded") show = excl;
+        row.classList.toggle("hidden", !show);
+      });
+    }));
+
+    // Progetti CRUD
+    const pForm = document.getElementById("project-form");
+    const pStatus = document.getElementById("project-status");
+    pForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(pForm);
+      const body = { name: fd.get("name"), kind: fd.get("kind"), color: fd.get("color") };
+      if (!body.name) { pStatus.textContent = "Nome obbligatorio"; pStatus.className = "mt-2 block text-xs text-red-600"; return; }
+      pStatus.textContent = "Creazione…"; pStatus.className = "mt-2 block text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/finance/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { pStatus.textContent = "✗ " + (d.error || res.status); pStatus.className = "mt-2 block text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { pStatus.textContent = "Errore di rete"; pStatus.className = "mt-2 block text-xs text-red-600"; }
+    });
+    document.querySelectorAll("[data-proj-archive]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-proj-archive");
+      const archived = btn.getAttribute("data-archived") === "1";
+      await fetch("/api/admin/finance/projects?id=" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: !archived }) });
+      location.reload();
+    }));
+    document.querySelectorAll("[data-proj-delete]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-proj-delete");
+      if (!confirm("Eliminare il progetto? Le transazioni collegate torneranno 'non attribuite'.")) return;
+      await fetch("/api/admin/finance/projects?id=" + encodeURIComponent(id), { method: "DELETE" });
+      location.reload();
+    }));
+
+    // Missioni CRUD
+    const mForm = document.getElementById("mission-form");
+    const mStatus = document.getElementById("mission-status");
+    mForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(mForm);
+      const body = {
+        title: fd.get("title"),
+        opportunityId: fd.get("opportunityId") || null,
+        startDate: fd.get("startDate") || null,
+        endDate: fd.get("endDate") || null,
+        location: fd.get("location") || null,
+        budgetEur: fd.get("budgetEur") || null,
+      };
+      if (!body.title) { mStatus.textContent = "Titolo obbligatorio"; mStatus.className = "mt-2 block text-xs text-red-600"; return; }
+      mStatus.textContent = "Creazione…"; mStatus.className = "mt-2 block text-xs text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/admin/finance/missions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const d = await res.json();
+        if (!res.ok || !d.ok) { mStatus.textContent = "✗ " + (d.error || res.status); mStatus.className = "mt-2 block text-xs text-red-600"; return; }
+        location.reload();
+      } catch (e) { mStatus.textContent = "Errore di rete"; mStatus.className = "mt-2 block text-xs text-red-600"; }
+    });
+    document.querySelectorAll("[data-mission-archive]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-mission-archive");
+      const archived = btn.getAttribute("data-archived") === "1";
+      await fetch("/api/admin/finance/missions?id=" + encodeURIComponent(id), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: !archived }) });
+      location.reload();
+    }));
+    document.querySelectorAll("[data-mission-delete]").forEach((btn) => btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-mission-delete");
+      if (!confirm("Eliminare la missione? Le transazioni collegate resteranno, ma senza missione.")) return;
+      await fetch("/api/admin/finance/missions?id=" + encodeURIComponent(id), { method: "DELETE" });
+      location.reload();
+    }));
+  })();
+</script>

@@ -17,8 +17,8 @@
   --color-nx-accent-soft: #fef3c7;
 
   /* Font stacks - Montserrat unico font del brand */
-  --font-display: "Montserrat", system-ui, -apple-system, sans-serif;
-  --font-body: "Montserrat", system-ui, -apple-system, sans-serif;
+  --font-display: "Montserrat Variable", "Montserrat", system-ui, -apple-system, sans-serif;
+  --font-body: "Montserrat Variable", "Montserrat", system-ui, -apple-system, sans-serif;
 }
 
 html {
@@ -70,4 +70,42 @@ body {
 .nx-hero-pattern > * {
   position: relative;
   z-index: 1;
+}
+
+/* ===========================================================================
+   Contrasto (WCAG 2.1 AA) — rilievo della revisione legale del 24/09/2026.
+   Il ciano di marca #05abc4 su bianco vale 2,75:1, sotto il minimo di 4,5:1
+   per il testo (e sotto il 3:1 richiesto perfino per il testo grande).
+   Il ciano resta per i fondi decorativi; per il testo e per i pulsanti con
+   scritta bianca si usa #07798b, che sullo stesso bianco vale 5,10:1.
+   =========================================================================== */
+.text-nx-cyan {
+  color: #07798b;
+}
+/* Solo quando il ciano fa da fondo a una scritta bianca: le fasce e gli
+   elementi decorativi senza testo conservano il ciano acceso. */
+.bg-nx-cyan.text-white,
+.bg-nx-cyan .text-white {
+  background-color: #07798b;
+}
+/* Il grigio chiaro #b4b4b4 vale 2,07:1: resta buono per bordi e separatori,
+   non per il testo. */
+.text-nx-gray-light {
+  color: #6b7276;
+}
+
+/* Salto al contenuto: primo elemento focalizzabile, visibile solo da tastiera. */
+.salta-al-contenuto {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1.25rem;
+  background: #07798b;
+  color: #fff;
+  font-weight: 700;
+  border-radius: 0 0 0.5rem 0;
+}
+.salta-al-contenuto:focus {
+  left: 0;
 }

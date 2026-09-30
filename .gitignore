@@ -38,3 +38,20 @@ coverage/
 
 # claude code internal
 .claude/
+
+# Cloudflare API token (nexludica-deploy)
+.cf-token
+
+# Tmp schema dumps
+tmp-schemas/
+
+# --- Esclusi dal repository pubblico ---
+# Dati e articolo della ricerca TUMI: contengono gli identificativi Prolific dei
+# partecipanti. Vivono in un repository privato a parte.
+analysis/
+overleaf-tumi/
+__pycache__/
+# Catalogo miniature: sul sito e' protetto da password.
+src/data/mmf/
+# Valutazione legale interna.
+docs/COMPLIANCE.md

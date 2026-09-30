@@ -1,13 +1,16 @@
 /**
  * Type definitions per le righe del database D1.
- * I tipi corrispondono allo schema in migrations/0001_init.sql.
+ * I tipi corrispondono allo schema in migrations/0001_init.sql + estensioni.
  */
+
+/** Ruoli supportati. CHECK constraint definito in migration 0005. */
+export type UserRole = "member" | "admin" | "collaborator";
 
 export interface UserRow {
   id: string;
   email: string;
   name: string;
-  role: "member" | "admin";
+  role: UserRole;
   active: number; // 0/1
   created_at: number;
   last_login_at: number | null;
@@ -49,6 +52,7 @@ export interface ArticleRow {
   user_id: string;
   title: string;
   speaker: string;
+  editor: string | null;
   meeting_date: string; // YYYY-MM-DD
   abstract: string;
   tags: string | null;
@@ -56,6 +60,9 @@ export interface ArticleRow {
   document_filename: string | null;
   video_url: string | null;
   status: "draft" | "published" | "archived";
+  transcript: string | null;
+  body: string | null;
+  edit_token: string | null;
   created_at: number;
   updated_at: number;
 }

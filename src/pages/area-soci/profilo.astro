@@ -63,6 +63,36 @@ if (db) {
           </label>
         </div>
       </fieldset>
+
+      <!-- Email: privata (login) + eventuale ufficiale @nexludica.org -->
+      <fieldset class="rounded-xl border border-nx-gray-light/30 p-5">
+        <legend class="px-2 text-xs font-bold uppercase tracking-widest text-nx-gray-dark">Email</legend>
+        <div class="mt-3 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-nx-dark">Email privata</label>
+            <input type="email" value={profile?.email ?? user?.email ?? ""} readonly
+                   class="mt-1 block w-full cursor-not-allowed rounded-lg border border-nx-gray-light/40 bg-nx-off-white px-4 py-2.5 text-sm text-nx-gray-dark" />
+            <p class="mt-1 text-xs text-nx-gray-dark">È l'indirizzo con cui accedi. Per modificarlo scrivi a <a href="mailto:info@nexludica.org" class="text-nx-cyan no-underline hover:underline">info@nexludica.org</a>.</p>
+          </div>
+          <label class="flex items-start gap-3">
+            <input type="checkbox" id="hasNexludica" checked={!!profile?.emailNexludica}
+                   class="mt-0.5 h-5 w-5 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan focus:ring-nx-cyan/20" />
+            <div>
+              <span class="text-sm font-semibold text-nx-dark">Ho un'email @nexludica.org</span>
+              <p class="mt-1 text-xs text-nx-gray-dark">Spunta se hai (o avrai) un indirizzo ufficiale. Puoi aggiungerlo tu ora o farlo aggiungere in seguito.</p>
+            </div>
+          </label>
+          <div id="nexludica-wrap" class={profile?.emailNexludica ? "" : "hidden"}>
+            <label for="emailNexludica" class="block text-sm font-medium text-nx-dark">Email nexludica (ufficiale)</label>
+            <input type="email" id="emailNexludica" name="emailNexludica"
+                   value={profile?.emailNexludica ?? ""} maxlength="120"
+                   placeholder="nome.cognome@nexludica.org"
+                   class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+            <p class="mt-1 text-xs text-nx-gray-dark">Deve finire con <code class="rounded bg-nx-off-white px-1 font-mono">@nexludica.org</code>.</p>
+          </div>
+        </div>
+      </fieldset>
+
       <div class="grid gap-5 sm:grid-cols-2">
         <div class="sm:col-span-2">
           <label for="displayName" class="block text-sm font-medium text-nx-dark">Nome visualizzato</label>
@@ -95,7 +125,7 @@ if (db) {
           <div class="mt-2 flex items-center gap-4">
             <div id="photo-preview" class="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-nx-cyan-light text-2xl font-bold text-nx-cyan">
               {profile?.photoUrl ? (
-                <img src={profile.photoUrl} alt="" class="h-full w-full object-cover" />
+                <img src={profile.photoUrl} alt="" loading="lazy" decoding="async" class="h-full w-full object-cover" />
               ) : (
                 <span>?</span>
               )}
@@ -108,6 +138,64 @@ if (db) {
             </div>
           </div>
           <input type="hidden" id="photoUrl" name="photoUrl" value={profile?.photoUrl ?? ""} />
+        </div>
+        <div class="sm:col-span-2">
+          <label for="cvAcademic" class="block text-sm font-medium text-nx-dark">Curriculum accademico</label>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Formazione, ruoli di ricerca, attività accademiche. Sintassi supportata:
+            <code class="rounded bg-nx-off-white px-1 font-mono">## Titolo</code> per sezioni,
+            <code class="rounded bg-nx-off-white px-1 font-mono">.elemento</code> per elenco puntato,
+            linea vuota = nuovo paragrafo, URL = link automatici. Pagina pubblica: /chi-siamo/{profile?.slug ?? "tuo-nome"}.
+          </p>
+          <textarea id="cvAcademic" name="cvAcademic" rows="8" maxlength="8000"
+                    placeholder={"Formazione\nPhD in Psicologia — Università di ..., 2022\nMSc in ..., 2018\n\nPubblicazioni\n…"}
+                    class="mt-2 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 font-mono text-xs text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">{profile?.cvAcademic ?? ""}</textarea>
+        </div>
+        <div class="sm:col-span-2">
+          <label for="cvOther" class="block text-sm font-medium text-nx-dark">Informazioni generali</label>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Sezione introduttiva del profilo (appare in cima alla tua pagina pubblica): chi sei, cosa fai, esperienze, progetti.
+            Sintassi supportata:
+            <code class="rounded bg-nx-off-white px-1 font-mono">## Titolo</code> per sezioni,
+            <code class="rounded bg-nx-off-white px-1 font-mono">.elemento</code> per elenco puntato,
+            linea vuota = nuovo paragrafo, URL = link automatici.
+          </p>
+          <textarea id="cvOther" name="cvOther" rows="6" maxlength="8000"
+                    placeholder="Esperienze lavorative, hobby, progetti personali, qualsiasi cosa che racconti chi sei..."
+                    class="mt-2 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">{profile?.cvOther ?? ""}</textarea>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Pubblicazioni</label>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Articoli, capitoli, atti di convegno. Inserisci il DOI e clicca <strong>Cerca</strong> per autocompletare titolo / autori / venue / anno da CrossRef. Puoi sempre modificare i campi a mano.
+          </p>
+          <div id="publications-list" class="mt-2 space-y-3"></div>
+          <button type="button" id="add-publication" class="mt-2 inline-flex items-center gap-1 rounded-lg border border-nx-cyan/40 bg-nx-cyan-light/30 px-3 py-1.5 text-xs font-semibold text-nx-cyan transition hover:bg-nx-cyan-light/60">
+            + Aggiungi pubblicazione
+          </button>
+          <p id="publications-status" class="mt-2 text-xs"></p>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Premi e riconoscimenti</label>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Awards, menzioni, riconoscimenti professionali e accademici. Tipicamente: titolo del premio, ente che lo conferisce, anno.
+          </p>
+          <div id="awards-list" class="mt-2 space-y-3"></div>
+          <button type="button" id="add-award" class="mt-2 inline-flex items-center gap-1 rounded-lg border border-nx-cyan/40 bg-nx-cyan-light/30 px-3 py-1.5 text-xs font-semibold text-nx-cyan transition hover:bg-nx-cyan-light/60">
+            + Aggiungi premio
+          </button>
+          <p id="awards-status" class="mt-2 text-xs"></p>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-nx-dark">Campi personalizzati</label>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Aggiungi info aggiuntive con la struttura "etichetta + valore" (es. "Lingue parlate" → "Italiano, inglese, francese"). Max 20.
+          </p>
+          <div id="custom-fields-list" class="mt-2 space-y-2"></div>
+          <button type="button" id="add-custom-field" class="mt-2 inline-flex items-center gap-1 rounded-lg border border-nx-cyan/40 bg-nx-cyan-light/30 px-3 py-1.5 text-xs font-semibold text-nx-cyan transition hover:bg-nx-cyan-light/60">
+            + Aggiungi campo
+          </button>
+          <input type="hidden" id="customFieldsHidden" name="customFields" value="" />
         </div>
         <div>
           <label for="website" class="block text-sm font-medium text-nx-dark">Sito web (opzionale)</label>
@@ -142,6 +230,14 @@ if (db) {
     </p>
 
     <form id="password-form" class="mt-6 space-y-4">
+      <div>
+        <label for="old-password" class="block text-sm font-medium text-nx-dark">Password attuale</label>
+        <input
+          type="password" id="old-password" name="oldPassword" autocomplete="current-password"
+          class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm text-nx-dark outline-none transition focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"
+        />
+        <p class="mt-1 text-xs text-nx-gray-dark">Lascia vuoto se stai impostando una password per la prima volta.</p>
+      </div>
       <div class="grid gap-4 sm:grid-cols-2">
         <div>
           <label for="new-password" class="block text-sm font-medium text-nx-dark">Nuova password</label>
@@ -172,6 +268,479 @@ if (db) {
   </div>
 </AreaSociLayout>
 
+<script is:inline define:vars={{ initialCustomFields: profile?.customFields ?? [] }}>
+  window.__nxCustomFields = initialCustomFields;
+</script>
+
+<script is:inline>
+  // === Editor pubblicazioni ===
+  // CRUD live contro /api/me/publications (sezione separata dal form
+  // principale: ogni Add/Update/Delete e' una request indipendente).
+  (function () {
+    const listEl = document.getElementById("publications-list");
+    const addBtn = document.getElementById("add-publication");
+    const statusEl = document.getElementById("publications-status");
+    if (!listEl || !addBtn) return;
+    let pubs = []; // local cache
+
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = "mt-2 text-xs " + (
+        kind === "ok" ? "text-emerald-600" :
+        kind === "err" ? "text-red-600" : "text-nx-gray-dark"
+      );
+    }
+
+    async function loadList() {
+      try {
+        const res = await fetch("/api/me/publications");
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+        pubs = Array.isArray(data.publications) ? data.publications : [];
+        render();
+      } catch (e) {
+        setStatus("Errore caricamento: " + (e.message || e), "err");
+      }
+    }
+
+    function render() {
+      listEl.innerHTML = "";
+      if (pubs.length === 0) {
+        const p = document.createElement("p");
+        p.className = "text-xs italic text-nx-gray-dark";
+        p.textContent = "Nessuna pubblicazione. Clicca + per aggiungerne una.";
+        listEl.appendChild(p);
+        return;
+      }
+      pubs.forEach((pub) => listEl.appendChild(renderCard(pub)));
+    }
+
+    function renderCard(pub) {
+      const card = document.createElement("div");
+      card.className = "rounded-xl border border-nx-gray-light/30 bg-nx-off-white p-4";
+
+      // Row 1: DOI + Cerca + Elimina
+      const row1 = document.createElement("div");
+      row1.className = "flex flex-wrap items-end gap-2";
+      const doiWrap = document.createElement("div");
+      doiWrap.className = "flex-1 min-w-[200px]";
+      const doiLab = document.createElement("label");
+      doiLab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      doiLab.textContent = "DOI";
+      const doiInp = document.createElement("input");
+      doiInp.type = "text";
+      doiInp.value = pub.doi || "";
+      doiInp.placeholder = "10.1234/example";
+      doiInp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 font-mono text-xs";
+      doiWrap.appendChild(doiLab);
+      doiWrap.appendChild(doiInp);
+
+      const lookupBtn = document.createElement("button");
+      lookupBtn.type = "button";
+      lookupBtn.textContent = "Cerca";
+      lookupBtn.className = "rounded-lg bg-nx-cyan px-3 py-1.5 text-xs font-semibold text-white hover:bg-nx-blue";
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "Elimina";
+      delBtn.className = "rounded-lg border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold text-nx-gray-dark hover:border-red-300 hover:text-red-600";
+
+      row1.appendChild(doiWrap);
+      row1.appendChild(lookupBtn);
+      row1.appendChild(delBtn);
+      card.appendChild(row1);
+
+      // Row 2: Titolo
+      const titleWrap = document.createElement("div");
+      titleWrap.className = "mt-2";
+      const titleLab = document.createElement("label");
+      titleLab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      titleLab.textContent = "Titolo *";
+      const titleInp = document.createElement("input");
+      titleInp.type = "text";
+      titleInp.value = pub.title || "";
+      titleInp.maxLength = 500;
+      titleInp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-sm";
+      titleWrap.appendChild(titleLab);
+      titleWrap.appendChild(titleInp);
+      card.appendChild(titleWrap);
+
+      // Row 3: Autori
+      const authWrap = document.createElement("div");
+      authWrap.className = "mt-2";
+      const authLab = document.createElement("label");
+      authLab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      authLab.textContent = "Autori";
+      const authInp = document.createElement("input");
+      authInp.type = "text";
+      authInp.value = pub.authors || "";
+      authInp.placeholder = "Cognome, N.; Cognome2, N.";
+      authInp.maxLength = 1000;
+      authInp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-sm";
+      authWrap.appendChild(authLab);
+      authWrap.appendChild(authInp);
+      card.appendChild(authWrap);
+
+      // Row 4: Venue + Anno
+      const row4 = document.createElement("div");
+      row4.className = "mt-2 grid grid-cols-[1fr_100px] gap-2";
+      const venueWrap = document.createElement("div");
+      const venueLab = document.createElement("label");
+      venueLab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      venueLab.textContent = "Venue / Rivista";
+      const venueInp = document.createElement("input");
+      venueInp.type = "text";
+      venueInp.value = pub.venue || "";
+      venueInp.placeholder = "Journal of ..., Conferenza, Editore";
+      venueInp.maxLength = 500;
+      venueInp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-sm";
+      venueWrap.appendChild(venueLab);
+      venueWrap.appendChild(venueInp);
+      const yearWrap = document.createElement("div");
+      const yearLab = document.createElement("label");
+      yearLab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      yearLab.textContent = "Anno";
+      const yearInp = document.createElement("input");
+      yearInp.type = "number";
+      yearInp.value = pub.year || "";
+      yearInp.min = 1900;
+      yearInp.max = 2100;
+      yearInp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-sm";
+      yearWrap.appendChild(yearLab);
+      yearWrap.appendChild(yearInp);
+      row4.appendChild(venueWrap);
+      row4.appendChild(yearWrap);
+      card.appendChild(row4);
+
+      // Save button row
+      const saveRow = document.createElement("div");
+      saveRow.className = "mt-3 flex items-center gap-3";
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.textContent = pub.id ? "Salva modifiche" : "Aggiungi";
+      saveBtn.className = "rounded-lg bg-nx-cyan px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-white hover:bg-nx-blue";
+      const cardStatus = document.createElement("span");
+      cardStatus.className = "text-xs";
+      saveRow.appendChild(saveBtn);
+      saveRow.appendChild(cardStatus);
+      card.appendChild(saveRow);
+
+      // Handlers
+      // Abstract (textarea opzionale — viene riempita anche dal lookup)
+      const absWrap = document.createElement("div");
+      absWrap.className = "mt-2";
+      const absLab = document.createElement("label");
+      absLab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      absLab.textContent = "Abstract";
+      const absInp = document.createElement("textarea");
+      absInp.value = pub.abstract || "";
+      absInp.rows = 4;
+      absInp.placeholder = "Lasciato vuoto se non disponibile. Si autocompila dal DOI (se CrossRef lo fornisce).";
+      absInp.maxLength = 4000;
+      absInp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-sm";
+      absWrap.appendChild(absLab);
+      absWrap.appendChild(absInp);
+      card.insertBefore(absWrap, saveRow);
+
+      lookupBtn.addEventListener("click", async () => {
+        const doi = doiInp.value.trim();
+        if (!doi) {
+          cardStatus.textContent = "Inserisci un DOI";
+          cardStatus.className = "text-xs text-red-600";
+          return;
+        }
+        cardStatus.textContent = "Ricerca su CrossRef…";
+        cardStatus.className = "text-xs text-nx-gray-dark";
+        try {
+          const res = await fetch("/api/me/publications/lookup?doi=" + encodeURIComponent(doi));
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            cardStatus.textContent = "✗ " + (data.error || "Non trovato");
+            cardStatus.className = "text-xs text-red-600";
+            return;
+          }
+          const m = data.metadata;
+          if (m.title) titleInp.value = m.title;
+          if (m.authors) authInp.value = m.authors;
+          if (m.venue) venueInp.value = m.venue;
+          if (m.year) yearInp.value = String(m.year);
+          if (m.doi) doiInp.value = m.doi;
+          if (m.abstract) absInp.value = m.abstract;
+          const note = m.abstract ? " (abstract incluso)" : " (no abstract su CrossRef)";
+          cardStatus.textContent = "✓ Dati estratti" + note;
+          cardStatus.className = "text-xs text-emerald-600";
+        } catch (e) {
+          cardStatus.textContent = "Errore di rete";
+          cardStatus.className = "text-xs text-red-600";
+        }
+      });
+
+      saveBtn.addEventListener("click", async () => {
+        const body = {
+          title: titleInp.value.trim(),
+          authors: authInp.value.trim() || null,
+          venue: venueInp.value.trim() || null,
+          year: yearInp.value ? Number(yearInp.value) : null,
+          doi: doiInp.value.trim() || null,
+          abstract: absInp.value.trim() || null,
+        };
+        if (!body.title) {
+          cardStatus.textContent = "Il titolo e' obbligatorio";
+          cardStatus.className = "text-xs text-red-600";
+          return;
+        }
+        cardStatus.textContent = "Salvataggio…";
+        cardStatus.className = "text-xs text-nx-gray-dark";
+        try {
+          const url = pub.id ? "/api/me/publications/" + encodeURIComponent(pub.id) : "/api/me/publications";
+          const method = pub.id ? "PUT" : "POST";
+          const res = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            cardStatus.textContent = "✗ " + (data.error || res.status);
+            cardStatus.className = "text-xs text-red-600";
+            return;
+          }
+          // Aggiorna cache locale
+          if (pub.id) {
+            const idx = pubs.findIndex((p) => p.id === pub.id);
+            if (idx !== -1) pubs[idx] = data.publication;
+          } else {
+            pubs.unshift(data.publication);
+          }
+          render();
+          setStatus("✓ Pubblicazioni aggiornate", "ok");
+        } catch (e) {
+          cardStatus.textContent = "Errore di rete";
+          cardStatus.className = "text-xs text-red-600";
+        }
+      });
+
+      delBtn.addEventListener("click", async () => {
+        if (!pub.id) {
+          // pubblicazione non ancora salvata → rimuovi solo localmente
+          pubs = pubs.filter((p) => p !== pub);
+          render();
+          return;
+        }
+        if (!confirm("Eliminare questa pubblicazione?")) return;
+        try {
+          const res = await fetch("/api/me/publications/" + encodeURIComponent(pub.id), {
+            method: "DELETE",
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            cardStatus.textContent = "✗ " + (data.error || res.status);
+            cardStatus.className = "text-xs text-red-600";
+            return;
+          }
+          pubs = pubs.filter((p) => p.id !== pub.id);
+          render();
+          setStatus("✓ Pubblicazione eliminata", "ok");
+        } catch (e) {
+          cardStatus.textContent = "Errore di rete";
+          cardStatus.className = "text-xs text-red-600";
+        }
+      });
+
+      return card;
+    }
+
+    addBtn.addEventListener("click", () => {
+      pubs.unshift({ id: null, title: "", authors: "", venue: "", year: null, doi: "" });
+      render();
+    });
+
+    // Initial load
+    loadList();
+  })();
+</script>
+
+<script is:inline>
+  // === Editor premi/awards ===
+  // Pattern simile a publications ma con campi piu' semplici (no DOI/CrossRef).
+  (function () {
+    const listEl = document.getElementById("awards-list");
+    const addBtn = document.getElementById("add-award");
+    const statusEl = document.getElementById("awards-status");
+    if (!listEl || !addBtn) return;
+    let awards = [];
+
+    function setStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = "mt-2 text-xs " + (
+        kind === "ok" ? "text-emerald-600" :
+        kind === "err" ? "text-red-600" : "text-nx-gray-dark"
+      );
+    }
+
+    async function loadList() {
+      try {
+        const res = await fetch("/api/me/awards");
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || res.status);
+        awards = Array.isArray(data.awards) ? data.awards : [];
+        render();
+      } catch (e) {
+        setStatus("Errore caricamento: " + (e.message || e), "err");
+      }
+    }
+
+    function render() {
+      listEl.innerHTML = "";
+      if (awards.length === 0) {
+        const p = document.createElement("p");
+        p.className = "text-xs italic text-nx-gray-dark";
+        p.textContent = "Nessun premio. Clicca + per aggiungerne uno.";
+        listEl.appendChild(p);
+        return;
+      }
+      awards.forEach((a) => listEl.appendChild(renderCard(a)));
+    }
+
+    function fieldRow(label, type, value, placeholder, maxLen) {
+      const wrap = document.createElement("div");
+      const lab = document.createElement("label");
+      lab.className = "block text-[11px] font-semibold uppercase tracking-wider text-nx-gray-dark";
+      lab.textContent = label;
+      const inp = document.createElement(type === "textarea" ? "textarea" : "input");
+      if (type !== "textarea") inp.type = type;
+      inp.value = value || "";
+      if (placeholder) inp.placeholder = placeholder;
+      if (maxLen) inp.maxLength = maxLen;
+      inp.className = "mt-1 block w-full rounded border border-nx-gray-light/40 bg-white px-2 py-1.5 text-sm";
+      if (type === "textarea") inp.rows = 3;
+      wrap.appendChild(lab);
+      wrap.appendChild(inp);
+      return { wrap, inp };
+    }
+
+    function renderCard(award) {
+      const card = document.createElement("div");
+      card.className = "rounded-xl border border-nx-gray-light/30 bg-nx-off-white p-4";
+
+      const titleF = fieldRow("Titolo *", "text", award.title, "es. Best Paper Award", 300);
+      card.appendChild(titleF.wrap);
+
+      const row2 = document.createElement("div");
+      row2.className = "mt-2 grid grid-cols-[1fr_100px] gap-2";
+      const issuerF = fieldRow("Ente / Conferenza / Premio", "text", award.issuer, "es. DRS Learn X Design", 300);
+      const yearF = fieldRow("Anno", "number", award.year, "", 0);
+      yearF.inp.min = 1900; yearF.inp.max = 2100;
+      row2.appendChild(issuerF.wrap);
+      row2.appendChild(yearF.wrap);
+      card.appendChild(row2);
+
+      const urlF = fieldRow("Link (opzionale)", "url", award.url, "https://...", 500);
+      urlF.wrap.className = "mt-2";
+      card.appendChild(urlF.wrap);
+
+      const descF = fieldRow("Descrizione (opzionale)", "textarea", award.description, "Motivazione, contesto, dettagli...", 2000);
+      descF.wrap.className = "mt-2";
+      card.appendChild(descF.wrap);
+
+      const saveRow = document.createElement("div");
+      saveRow.className = "mt-3 flex items-center gap-3";
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.textContent = award.id ? "Salva modifiche" : "Aggiungi";
+      saveBtn.className = "rounded-lg bg-nx-cyan px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-white hover:bg-nx-blue";
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "Elimina";
+      delBtn.className = "rounded-lg border border-nx-gray-light/40 px-3 py-1.5 text-xs font-semibold text-nx-gray-dark hover:border-red-300 hover:text-red-600";
+      const cardStatus = document.createElement("span");
+      cardStatus.className = "text-xs";
+      saveRow.appendChild(saveBtn);
+      saveRow.appendChild(delBtn);
+      saveRow.appendChild(cardStatus);
+      card.appendChild(saveRow);
+
+      saveBtn.addEventListener("click", async () => {
+        const body = {
+          title: titleF.inp.value.trim(),
+          issuer: issuerF.inp.value.trim() || null,
+          year: yearF.inp.value ? Number(yearF.inp.value) : null,
+          url: urlF.inp.value.trim() || null,
+          description: descF.inp.value.trim() || null,
+        };
+        if (!body.title) {
+          cardStatus.textContent = "Il titolo e' obbligatorio";
+          cardStatus.className = "text-xs text-red-600";
+          return;
+        }
+        cardStatus.textContent = "Salvataggio…";
+        cardStatus.className = "text-xs text-nx-gray-dark";
+        try {
+          const url = award.id ? "/api/me/awards/" + encodeURIComponent(award.id) : "/api/me/awards";
+          const method = award.id ? "PUT" : "POST";
+          const res = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            cardStatus.textContent = "✗ " + (data.error || res.status);
+            cardStatus.className = "text-xs text-red-600";
+            return;
+          }
+          if (award.id) {
+            const idx = awards.findIndex((a) => a.id === award.id);
+            if (idx !== -1) awards[idx] = data.award;
+          } else {
+            awards.unshift(data.award);
+          }
+          render();
+          setStatus("✓ Premi aggiornati", "ok");
+        } catch (e) {
+          cardStatus.textContent = "Errore di rete";
+          cardStatus.className = "text-xs text-red-600";
+        }
+      });
+
+      delBtn.addEventListener("click", async () => {
+        if (!award.id) {
+          awards = awards.filter((a) => a !== award);
+          render();
+          return;
+        }
+        if (!confirm("Eliminare questo premio?")) return;
+        try {
+          const res = await fetch("/api/me/awards/" + encodeURIComponent(award.id), {
+            method: "DELETE",
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            cardStatus.textContent = "✗ " + (data.error || res.status);
+            cardStatus.className = "text-xs text-red-600";
+            return;
+          }
+          awards = awards.filter((a) => a.id !== award.id);
+          render();
+          setStatus("✓ Premio eliminato", "ok");
+        } catch (e) {
+          cardStatus.textContent = "Errore di rete";
+          cardStatus.className = "text-xs text-red-600";
+        }
+      });
+
+      return card;
+    }
+
+    addBtn.addEventListener("click", () => {
+      awards.unshift({ id: null, title: "", issuer: "", year: null, url: "", description: "" });
+      render();
+    });
+
+    loadList();
+  })();
+</script>
+
 <script is:inline>
   (function () {
     const form = document.getElementById("password-form");
@@ -183,6 +752,7 @@ if (db) {
       const fd = new FormData(form);
       const password = String(fd.get("password") || "");
       const confirm = String(fd.get("confirm") || "");
+      const oldPassword = String(fd.get("oldPassword") || "");
       if (password !== confirm) {
         status.textContent = "Le due password non coincidono";
         status.className = "text-sm text-red-600";
@@ -190,11 +760,13 @@ if (db) {
       }
       status.textContent = "Salvataggio...";
       status.className = "text-sm text-nx-gray-dark";
+      const btn = form.querySelector("button[type=submit]");
+      if (btn) btn.disabled = true;
       try {
         const res = await fetch("/api/me/password", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ password, oldPassword }),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
@@ -208,14 +780,22 @@ if (db) {
       } catch (e) {
         status.textContent = "Errore di rete";
         status.className = "text-sm text-red-600";
+      } finally {
+        if (btn) btn.disabled = false;
       }
     });
     removeBtn.addEventListener("click", async function () {
+      const oldPwd = prompt("Inserisci la password attuale per rimuoverla:");
+      if (oldPwd === null) return; // user cancelled
       if (!confirm("Rimuovere la password? Potrai accedere solo via magic link.")) return;
       status.textContent = "Rimozione...";
       status.className = "text-sm text-nx-gray-dark";
       try {
-        const res = await fetch("/api/me/password", { method: "DELETE" });
+        const res = await fetch("/api/me/password", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: oldPwd }),
+        });
         const data = await res.json();
         if (!res.ok || !data.ok) {
           status.textContent = "Errore: " + (data.error || res.status);
@@ -277,6 +857,80 @@ if (db) {
       });
     }
 
+    // === Custom fields: editor dinamico ===
+    const cfList = document.getElementById("custom-fields-list");
+    const cfAddBtn = document.getElementById("add-custom-field");
+    const cfHidden = document.getElementById("customFieldsHidden");
+    let cfState = [];
+    try {
+      const initial = window.__nxCustomFields;
+      if (Array.isArray(initial)) cfState = initial.slice(0, 20);
+    } catch (e) {}
+    // Pulisci la global subito dopo aver letto i dati: non serve piu'.
+    try { delete window.__nxCustomFields; } catch (e) {}
+
+    function renderCustomFields() {
+      cfList.innerHTML = "";
+      cfState.forEach((f, idx) => {
+        const row = document.createElement("div");
+        row.className = "grid grid-cols-[1fr_2fr_auto] gap-2 rounded-lg border border-nx-gray-light/30 bg-nx-off-white p-2";
+        const labelI = document.createElement("input");
+        labelI.type = "text";
+        labelI.value = f.label || "";
+        labelI.placeholder = "Etichetta (es. Lingue)";
+        labelI.maxLength = 80;
+        labelI.className = "rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs";
+        labelI.addEventListener("input", () => { cfState[idx].label = labelI.value; syncCfHidden(); });
+        const valI = document.createElement("input");
+        valI.type = "text";
+        valI.value = f.value || "";
+        valI.placeholder = "Valore (es. Italiano, inglese)";
+        valI.maxLength = 800;
+        valI.className = "rounded border border-nx-gray-light/40 bg-white px-2 py-1 text-xs";
+        valI.addEventListener("input", () => { cfState[idx].value = valI.value; syncCfHidden(); });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "✕";
+        del.className = "rounded-md border border-nx-gray-light/40 px-2 text-xs text-nx-gray-dark hover:border-red-300 hover:text-red-600";
+        del.addEventListener("click", () => { cfState.splice(idx, 1); renderCustomFields(); syncCfHidden(); });
+        row.appendChild(labelI);
+        row.appendChild(valI);
+        row.appendChild(del);
+        cfList.appendChild(row);
+      });
+      if (cfState.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "text-xs italic text-nx-gray-dark";
+        empty.textContent = "Nessun campo personalizzato. Clicca + per aggiungerne uno.";
+        cfList.appendChild(empty);
+      }
+    }
+    function syncCfHidden() {
+      cfHidden.value = JSON.stringify(cfState);
+    }
+    if (cfAddBtn) {
+      cfAddBtn.addEventListener("click", () => {
+        if (cfState.length >= 20) return;
+        cfState.push({ label: "", value: "" });
+        renderCustomFields();
+        syncCfHidden();
+      });
+    }
+    renderCustomFields();
+    syncCfHidden();
+
+    // === Toggle email nexludica ===
+    const hasNexludica = document.getElementById("hasNexludica");
+    const nexludicaWrap = document.getElementById("nexludica-wrap");
+    const emailNexludicaInput = document.getElementById("emailNexludica");
+    if (hasNexludica && nexludicaWrap) {
+      hasNexludica.addEventListener("change", function () {
+        nexludicaWrap.classList.toggle("hidden", !hasNexludica.checked);
+        if (hasNexludica.checked && emailNexludicaInput) emailNexludicaInput.focus();
+      });
+    }
+
+    // === Profile form submit ===
     const form = document.getElementById("profile-form");
     const status = document.getElementById("profile-status");
     if (!form) return;
@@ -289,6 +943,12 @@ if (db) {
       // Checkbox: vengono inclusi solo se selezionati, normalizzo a 0/1
       body.publicVisible = fd.has("publicVisible") ? "1" : "0";
       body.emailPublic = fd.has("emailPublic") ? "1" : "0";
+      // Email nexludica: se la spunta è tolta, azzera; altrimenti invia il valore
+      body.emailNexludica = (hasNexludica && hasNexludica.checked)
+        ? String(fd.get("emailNexludica") || "").trim()
+        : "";
+      // customFields: deserializza dalla stringa JSON
+      try { body.customFields = JSON.parse(body.customFields || "[]"); } catch { body.customFields = []; }
       const btn = form.querySelector("button[type=submit]");
       btn.disabled = true;
       try {

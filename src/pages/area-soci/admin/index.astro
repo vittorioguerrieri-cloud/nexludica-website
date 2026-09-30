@@ -38,14 +38,14 @@ function fmtMoney(n: number | null) {
 }
 const roleLabels: Record<string, string> = {
   admin: "Admin",
-  member: "Socio",
-  collaborator: "Collaboratore",
+  member: "Sociə",
+  collaborator: "Collaboratorə",
 };
 const statusLabels: Record<string, string> = {
-  active: "Attivo",
+  active: "Attivə",
   pending: "In attesa",
-  suspended: "Sospeso",
-  former: "Ex socio",
+  suspended: "Sospesə",
+  former: "Ex sociə",
 };
 const statusColors: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-800",
@@ -58,46 +58,86 @@ const statusColors: Record<string, string> = {
 <AreaSociLayout title="Amministrazione — Area Soci" active="admin">
   <div class="flex flex-wrap items-baseline justify-between gap-4">
     <div>
-      <h2 class="text-2xl font-bold text-nx-dark">Soci e collaboratori</h2>
+      <h2 class="text-2xl font-bold text-nx-dark">Persone iscritte</h2>
       <p class="mt-1 text-sm text-nx-gray-dark">
-        Gestione completa di tutti gli associati. Visibile solo agli admin.
+        Gestione completa di chi è iscritto. Visibile solo agli admin.
       </p>
     </div>
-    <button id="add-member-btn" class="rounded-lg bg-nx-cyan px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue">
-      + Nuovo
-    </button>
+    <div class="flex flex-wrap gap-3">
+      <button id="invite-btn" class="rounded-lg border border-nx-cyan/40 bg-white px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-nx-cyan transition hover:-translate-y-0.5 hover:border-nx-cyan hover:bg-nx-cyan-light/30">
+        🔗 Genera link iscrizione
+      </button>
+      <a href="/area-soci/admin/nuovo" class="rounded-lg bg-nx-cyan px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-white no-underline shadow-lg shadow-nx-cyan/30 transition hover:-translate-y-0.5 hover:bg-nx-blue">
+        + Nuova iscrizione
+      </a>
+    </div>
   </div>
 
-  <!-- Modal nuovo socio -->
-  <div id="add-member-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
-    <div class="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-      <h3 class="text-lg font-bold text-nx-dark">Aggiungi socio o collaboratore</h3>
-      <form id="add-member-form" class="mt-4 space-y-4">
+  <!-- Modal: genera link iscrizione -->
+  <div id="invite-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+      <div class="flex items-start justify-between gap-4">
         <div>
-          <label class="block text-sm font-medium text-nx-dark">Nome completo</label>
-          <input name="name" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <h3 class="text-lg font-bold text-nx-dark">Genera link iscrizione</h3>
+          <p class="mt-1 text-xs text-nx-gray-dark">
+            Il link permettera' a una nuova persona di auto-compilarsi il form di iscrizione.
+            Scade dopo 14 giorni ed e' utilizzabile una sola volta.
+          </p>
+        </div>
+        <button type="button" id="invite-close" class="text-2xl leading-none text-nx-gray-dark hover:text-nx-dark">×</button>
+      </div>
+
+      <!-- Step 1: form -->
+      <form id="invite-form" class="mt-4 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Nome destinatario (opzionale)</label>
+          <input name="intendedName" placeholder="es. Mario Rossi" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <p class="mt-1 text-xs text-nx-gray-dark">Verra' pre-compilato nel form, il destinatario lo puo' modificare.</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-nx-dark">Email</label>
-          <input type="email" name="email" required class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+          <label class="block text-sm font-medium text-nx-dark">Email destinatario (opzionale)</label>
+          <input type="email" name="intendedEmail" placeholder="mario@example.com" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
         </div>
         <div>
-          <label class="block text-sm font-medium text-nx-dark">Ruolo</label>
-          <select name="role" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm outline-none focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20">
-            <option value="member">Socio</option>
-            <option value="collaborator">Collaboratore</option>
-            <option value="admin">Admin</option>
-          </select>
+          <label class="block text-sm font-medium text-nx-dark">Nota interna (opzionale)</label>
+          <input name="note" placeholder="es. Conoscenza dal MeetLudica di marzo" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-nx-dark">Validita' (giorni)</label>
+          <input type="number" name="ttlDays" value="14" min="1" max="90" class="mt-1 block w-32 rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
         </div>
         <div class="flex gap-3 pt-2">
-          <button type="submit" class="flex-1 rounded-lg bg-nx-cyan px-4 py-2.5 text-sm font-bold uppercase tracking-wider text-white">
-            Crea
+          <button type="submit" id="invite-submit" class="rounded-lg bg-nx-cyan px-4 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-md transition hover:bg-nx-blue disabled:opacity-50">
+            Genera link
           </button>
-          <button type="button" id="add-member-cancel" class="rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm font-semibold text-nx-gray-dark">
+          <button type="button" id="invite-cancel" class="rounded-lg border border-nx-gray-light/40 px-4 py-2.5 text-sm font-semibold text-nx-gray-dark">
             Annulla
           </button>
         </div>
       </form>
+
+      <!-- Step 2: risultato (nascosto fino a generazione) -->
+      <div id="invite-result" class="mt-6 hidden space-y-3 rounded-lg border-2 border-emerald-200 bg-emerald-50 p-4">
+        <p class="text-sm font-bold text-emerald-900">✓ Link generato</p>
+        <div class="rounded-lg border border-emerald-200 bg-white p-3">
+          <p class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark">URL da inviare</p>
+          <p id="invite-url" class="mt-2 break-all font-mono text-xs text-nx-dark"></p>
+        </div>
+        <p id="invite-expires" class="text-xs text-emerald-900"></p>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="invite-copy" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-white hover:bg-emerald-700">
+            📋 Copia link
+          </button>
+          <a id="invite-mailto" href="#" class="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-900 no-underline hover:bg-emerald-50">
+            ✉ Apri email
+          </a>
+          <button type="button" id="invite-another" class="rounded-lg border border-nx-gray-light/40 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">
+            + Genera un altro
+          </button>
+        </div>
+      </div>
+
+      <p id="invite-error" class="mt-3 hidden text-sm text-red-600"></p>
     </div>
   </div>
 
@@ -111,10 +151,10 @@ const statusColors: Record<string, string> = {
         <!-- Header: foto + nome + role labels -->
         <div class="flex items-start gap-3">
           {m.photoUrl ? (
-            <img src={m.photoUrl} alt="" class="h-12 w-12 shrink-0 rounded-full object-cover" />
+            <img src={m.photoUrl} alt="" loading="lazy" decoding="async" class="h-12 w-12 shrink-0 rounded-full object-cover" />
           ) : (
             <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-nx-cyan-light text-sm font-bold text-nx-cyan">
-              {m.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}
+              {m.name.split(" ").filter(Boolean).map((s) => s[0]).slice(0, 2).join("")}
             </span>
           )}
           <div class="min-w-0 flex-1">
@@ -180,38 +220,112 @@ const statusColors: Record<string, string> = {
 
 <script is:inline>
   (function () {
-    const btn = document.getElementById("add-member-btn");
-    const modal = document.getElementById("add-member-modal");
-    const cancel = document.getElementById("add-member-cancel");
-    const form = document.getElementById("add-member-form");
-    if (btn && modal && cancel && form) {
-      btn.addEventListener("click", () => {
-        modal.classList.remove("hidden");
-        modal.classList.add("flex");
-      });
-      cancel.addEventListener("click", () => {
-        modal.classList.add("hidden");
-        modal.classList.remove("flex");
-      });
-      form.addEventListener("submit", async (e) => {
+    // === Modal "Genera link iscrizione" ===
+    const inviteBtn = document.getElementById("invite-btn");
+    const inviteModal = document.getElementById("invite-modal");
+    const inviteClose = document.getElementById("invite-close");
+    const inviteCancel = document.getElementById("invite-cancel");
+    const inviteForm = document.getElementById("invite-form");
+    const inviteSubmit = document.getElementById("invite-submit");
+    const inviteResult = document.getElementById("invite-result");
+    const inviteUrl = document.getElementById("invite-url");
+    const inviteExpires = document.getElementById("invite-expires");
+    const inviteCopy = document.getElementById("invite-copy");
+    const inviteMailto = document.getElementById("invite-mailto");
+    const inviteAnother = document.getElementById("invite-another");
+    const inviteError = document.getElementById("invite-error");
+
+    function openInviteModal() {
+      inviteModal.classList.remove("hidden");
+      inviteModal.classList.add("flex");
+      // Reset
+      inviteForm.classList.remove("hidden");
+      inviteResult.classList.add("hidden");
+      inviteError.classList.add("hidden");
+      inviteError.textContent = "";
+    }
+    function closeInviteModal() {
+      inviteModal.classList.add("hidden");
+      inviteModal.classList.remove("flex");
+    }
+    if (inviteBtn) inviteBtn.addEventListener("click", openInviteModal);
+    if (inviteClose) inviteClose.addEventListener("click", closeInviteModal);
+    if (inviteCancel) inviteCancel.addEventListener("click", closeInviteModal);
+
+    if (inviteForm) {
+      inviteForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const fd = new FormData(form);
-        const body = Object.fromEntries(fd.entries());
-        const res = await fetch("/api/admin/members", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) {
-          alert("Errore: " + (data.error || res.status));
-        } else {
-          window.location.reload();
+        inviteSubmit.disabled = true;
+        inviteError.classList.add("hidden");
+        const fd = new FormData(inviteForm);
+        const body = {};
+        for (const [k, v] of fd.entries()) if (v) body[k] = v;
+        if (body.ttlDays) body.ttlDays = Number(body.ttlDays);
+        try {
+          const res = await fetch("/api/admin/invitations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            inviteError.textContent = "Errore: " + (data.error || res.status);
+            inviteError.classList.remove("hidden");
+            inviteSubmit.disabled = false;
+            return;
+          }
+          // Mostra risultato
+          inviteUrl.textContent = data.invitation.url;
+          const expiresDate = new Date(data.invitation.expiresAt).toLocaleString("it-IT");
+          inviteExpires.textContent = "Valido fino al " + expiresDate + ".";
+          // Setup mailto
+          const subject = encodeURIComponent("Iscrizione a NexLudica APS");
+          const greeting = body.intendedName ? "Ciao " + body.intendedName + ",\n\n" : "Ciao,\n\n";
+          const bodyText = encodeURIComponent(
+            greeting +
+            "ecco il link per completare la tua iscrizione a NexLudica APS:\n\n" +
+            data.invitation.url +
+            "\n\nIl link e' valido fino al " + expiresDate + " e puo' essere usato una sola volta.\n\n" +
+            "Per qualsiasi dubbio, rispondi pure a questa email.\n\nGrazie!"
+          );
+          const to = body.intendedEmail ? encodeURIComponent(body.intendedEmail) : "";
+          inviteMailto.href = "mailto:" + to + "?subject=" + subject + "&body=" + bodyText;
+          inviteForm.classList.add("hidden");
+          inviteResult.classList.remove("hidden");
+          inviteSubmit.disabled = false;
+        } catch (err) {
+          inviteError.textContent = "Errore di rete";
+          inviteError.classList.remove("hidden");
+          inviteSubmit.disabled = false;
         }
       });
     }
 
-    // Sync Drive editors
+    if (inviteCopy) {
+      inviteCopy.addEventListener("click", async () => {
+        const text = inviteUrl.textContent || "";
+        try {
+          await navigator.clipboard.writeText(text);
+          inviteCopy.textContent = "✓ Copiato";
+          setTimeout(() => { inviteCopy.textContent = "📋 Copia link"; }, 1500);
+        } catch (e) {
+          // Fallback: select
+          const range = document.createRange();
+          range.selectNode(inviteUrl);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+        }
+      });
+    }
+    if (inviteAnother) {
+      inviteAnother.addEventListener("click", () => {
+        inviteForm.reset();
+        inviteForm.classList.remove("hidden");
+        inviteResult.classList.add("hidden");
+      });
+    }
+
+    // === Sync Drive editors ===
     const syncBtn = document.getElementById("sync-drive-btn");
     const syncStatus = document.getElementById("sync-drive-status");
     if (syncBtn && syncStatus) {

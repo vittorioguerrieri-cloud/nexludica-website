@@ -1,0 +1,385 @@
+---
+/**
+ * Dettaglio contatto: tutti i campi editabili inline (autosave),
+ * timeline delle interazioni + form per registrarne di nuove.
+ */
+import AreaSociLayout from "../../../layouts/AreaSociLayout.astro";
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import {
+  getContact, listInteractions, statusLabel, kindLabel,
+  type Contact, type ContactInteraction, type ContactStatus, type InteractionKind,
+} from "../../../server/contacts";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) return Astro.redirect("/login");
+
+const { id } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db || !id) return new Response("Not found", { status: 404 });
+
+const contact = await getContact(db, String(id));
+if (!contact) return new Response("Contatto non trovato", { status: 404 });
+
+const interactions = await listInteractions(db, contact.id);
+const { results: userResults } = await db.prepare("SELECT id, name FROM users ORDER BY name").all();
+const usersList = (userResults ?? []).map((r) => ({ id: String((r as any).id), name: String((r as any).name) }));
+const userNameById: Record<string, string> = {};
+for (const u of usersList) userNameById[u.id] = u.name;
+
+const isAdmin = user.role === "admin";
+
+function statusBadge(s: ContactStatus): string {
+  switch (s) {
+    case "lead":     return "bg-sky-100 text-sky-700";
+    case "active":   return "bg-emerald-100 text-emerald-700";
+    case "cold":     return "bg-amber-100 text-amber-700";
+    case "closed":   return "bg-nx-gray-light/40 text-nx-gray-dark";
+    case "archived": return "bg-nx-gray-light/40 text-nx-gray-dark";
+  }
+}
+function kindBadge(k: InteractionKind): string {
+  switch (k) {
+    case "email":   return "bg-sky-100 text-sky-700";
+    case "call":    return "bg-emerald-100 text-emerald-700";
+    case "meeting": return "bg-violet-100 text-violet-700";
+    case "event":   return "bg-amber-100 text-amber-700";
+    case "social":  return "bg-rose-100 text-rose-700";
+    case "message": return "bg-cyan-100 text-cyan-700";
+    case "other":   return "bg-nx-gray-light/40 text-nx-gray-dark";
+  }
+}
+function fmtDate(ts: number): string {
+  return new Date(ts).toLocaleDateString("it-IT", { day: "numeric", month: "short", year: "numeric" });
+}
+function fmtDatetime(ts: number): string {
+  return new Date(ts).toLocaleString("it-IT", { dateStyle: "medium", timeStyle: "short" });
+}
+function dateInputValue(ts: number | null): string {
+  if (ts == null) return "";
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+---
+
+<AreaSociLayout title={`${contact.fullName} — Contatti`} active="contatti">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <a href="/area-soci/contatti" class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-cyan">← Tutti i contatti</a>
+      <h2 class="mt-2 text-2xl font-bold text-nx-dark">{contact.fullName}</h2>
+      {(contact.role || contact.organization) && (
+        <p class="mt-1 text-sm text-nx-gray-dark">
+          {contact.role}{contact.role && contact.organization && " · "}{contact.organization}
+        </p>
+      )}
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="status-badge" class={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ${statusBadge(contact.status)}`}>
+        {statusLabel(contact.status)}
+      </span>
+      {isAdmin && (
+        <button id="delete-btn" class="rounded-md border border-red-300 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-red-600 hover:bg-red-50">
+          Elimina
+        </button>
+      )}
+    </div>
+  </div>
+
+  <p id="autosave-status" class="mt-2 text-[11px] text-nx-gray-dark"></p>
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
+    {/* === COLONNA SX: scheda contatto + timeline === */}
+    <div class="space-y-6">
+      {/* SCHEDA */}
+      <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Scheda</h3>
+        <div class="mt-4 grid gap-3 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Nome completo</label>
+            <input data-field="fullName" value={contact.fullName} maxlength="120"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Organizzazione</label>
+            <input data-field="organization" value={contact.organization ?? ""} maxlength="120"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Ruolo</label>
+            <input data-field="role" value={contact.role ?? ""} maxlength="80"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Email</label>
+            <input data-field="email" type="email" value={contact.email ?? ""} maxlength="200"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Telefono</label>
+            <input data-field="phone" value={contact.phone ?? ""} maxlength="60"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Città</label>
+            <input data-field="city" value={contact.city ?? ""} maxlength="80"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Website</label>
+            <input data-field="website" value={contact.website ?? ""} maxlength="300" placeholder="https://…"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">LinkedIn</label>
+            <input data-field="linkedin" value={contact.linkedin ?? ""} maxlength="300" placeholder="https://linkedin.com/in/…"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Tag</label>
+            <input data-field-special="tagsCsv" value={contact.tags.join(", ")} maxlength="400" placeholder="es. partner, scuola, sponsor"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Come l'abbiamo conosciuto/a</label>
+            <input data-field="source" value={contact.source ?? ""} maxlength="200"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-bold uppercase tracking-wider text-nx-gray-dark">Note</label>
+            <textarea data-field="notes" rows="4" maxlength="5000"
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none">{contact.notes ?? ""}</textarea>
+          </div>
+        </div>
+      </section>
+
+      {/* TIMELINE INTERAZIONI */}
+      <section class="rounded-xl border border-nx-gray-light/20 bg-white p-6">
+        <div class="flex items-baseline justify-between">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Storico interazioni</h3>
+          <span class="text-xs text-nx-gray-dark">{interactions.length} touchpoint</span>
+        </div>
+
+        {/* Form nuova interazione */}
+        <form id="int-form" class="mt-4 rounded-lg bg-nx-off-white p-4">
+          <div class="grid gap-3 sm:grid-cols-[160px_180px_1fr]">
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Tipo</label>
+              <select name="kind" class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">
+                <option value="email">Email</option>
+                <option value="call">Telefonata</option>
+                <option value="meeting" selected>Incontro</option>
+                <option value="event">Evento</option>
+                <option value="social">Social</option>
+                <option value="message">Messaggio</option>
+                <option value="other">Altro</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Data</label>
+              <input name="happenedAt" type="date" value={dateInputValue(Date.now())} required
+                class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Oggetto</label>
+              <input name="subject" maxlength="200" placeholder="es. Discussione collaborazione MeetLudica"
+                class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Note</label>
+            <textarea name="notes" rows="2" maxlength="5000" placeholder="Cosa ci siamo detti, prossimi passi…"
+              class="mt-1 w-full rounded-md border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none"></textarea>
+          </div>
+          <p id="int-err" class="mt-2 hidden rounded-md bg-red-50 px-3 py-2 text-xs text-red-700"></p>
+          <div class="mt-3 flex justify-end">
+            <button type="submit" class="rounded-md bg-nx-cyan px-4 py-2 text-sm font-bold text-white">+ Aggiungi interazione</button>
+          </div>
+        </form>
+
+        {/* Lista */}
+        <ul id="int-list" class="mt-4 space-y-3">
+          {interactions.length === 0 ? (
+            <li class="rounded-md border-2 border-dashed border-nx-gray-light/30 p-4 text-center text-xs italic text-nx-gray-dark">
+              Nessuna interazione ancora registrata.
+            </li>
+          ) : (
+            interactions.map((it) => {
+              const author = it.recordedBy ? userNameById[it.recordedBy] : null;
+              return (
+                <li class="rounded-md border border-nx-gray-light/20 p-3" data-int-id={it.id}>
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-baseline gap-2">
+                        <span class={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${kindBadge(it.kind)}`}>
+                          {kindLabel(it.kind)}
+                        </span>
+                        <span class="text-xs font-semibold text-nx-dark">{fmtDate(it.happenedAt)}</span>
+                        {author && <span class="text-[11px] text-nx-gray-dark">— {author}</span>}
+                      </div>
+                      {it.subject && <p class="mt-1 text-sm font-semibold text-nx-dark">{it.subject}</p>}
+                      {it.notes && <p class="mt-1 whitespace-pre-line text-sm text-nx-gray-dark">{it.notes}</p>}
+                    </div>
+                    <button data-del-int={it.id} class="shrink-0 text-xs text-red-500 hover:text-red-700">×</button>
+                  </div>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      </section>
+    </div>
+
+    {/* === SIDEBAR === */}
+    <aside class="space-y-4">
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Stato e gestione</h3>
+        <div class="mt-3 space-y-3">
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Stato</label>
+            <select data-field="status" class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">
+              <option value="lead" selected={contact.status === "lead"}>Lead</option>
+              <option value="active" selected={contact.status === "active"}>Attivo</option>
+              <option value="cold" selected={contact.status === "cold"}>Freddo</option>
+              <option value="closed" selected={contact.status === "closed"}>Chiuso</option>
+              <option value="archived" selected={contact.status === "archived"}>Archiviato</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Referente NexLudica</label>
+            <select data-field="ownedBy" class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none">
+              <option value="" selected={!contact.ownedBy}>— nessuno —</option>
+              {usersList.map((u) => (
+                <option value={u.id} selected={contact.ownedBy === u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">Promemoria follow-up</label>
+            <input data-field-special="followUpDate" type="date" value={dateInputValue(contact.followUpAt)}
+              class="nx-edit mt-1 w-full rounded-md border border-nx-gray-light/40 px-2 py-1.5 text-sm focus:border-nx-cyan focus:outline-none" />
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5">
+        <h3 class="text-sm font-bold uppercase tracking-wider text-nx-dark">Metadati</h3>
+        <dl class="mt-3 space-y-1.5 text-xs">
+          <div><dt class="inline font-semibold text-nx-gray-dark">Creato:</dt> <dd class="inline">{fmtDatetime(contact.createdAt)}</dd></div>
+          <div><dt class="inline font-semibold text-nx-gray-dark">Aggiornato:</dt> <dd class="inline">{fmtDatetime(contact.updatedAt)}</dd></div>
+          {contact.createdBy && (
+            <div><dt class="inline font-semibold text-nx-gray-dark">Aggiunto da:</dt> <dd class="inline">{userNameById[contact.createdBy] ?? "—"}</dd></div>
+          )}
+          {contact.lastInteractionAt && (
+            <div><dt class="inline font-semibold text-nx-gray-dark">Ultima interazione:</dt> <dd class="inline">{fmtDate(contact.lastInteractionAt)}</dd></div>
+          )}
+        </dl>
+      </div>
+    </aside>
+  </div>
+
+  <script is:inline define:vars={{ contactId: contact.id }}>
+    // ==== AUTOSAVE EDIT INLINE ====
+    const statusEl = document.getElementById("autosave-status");
+    let saveTimer = null;
+    const pending = {};
+    function markSaving() { statusEl.textContent = "Salvataggio…"; statusEl.className = "mt-2 text-[11px] text-amber-600"; }
+    function markSaved() { statusEl.textContent = "✓ Salvato"; statusEl.className = "mt-2 text-[11px] text-emerald-600"; setTimeout(() => { statusEl.textContent = ""; }, 1200); }
+    function markErr(m) { statusEl.textContent = "Errore: " + m; statusEl.className = "mt-2 text-[11px] text-red-600"; }
+    async function flush() {
+      if (Object.keys(pending).length === 0) return;
+      const payload = { ...pending };
+      Object.keys(pending).forEach((k) => delete pending[k]);
+      markSaving();
+      try {
+        const r = await fetch(`/api/contatti/${contactId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        markSaved();
+      } catch (e) { markErr(e.message); }
+    }
+    function debounce() { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(flush, 600); }
+
+    document.querySelectorAll("[data-field]").forEach((el) => {
+      const trigger = () => {
+        const v = el.value;
+        pending[el.dataset.field] = v === "" ? null : v;
+        debounce();
+      };
+      el.addEventListener("input", trigger);
+      el.addEventListener("change", trigger);
+      el.addEventListener("blur", () => { if (saveTimer) { clearTimeout(saveTimer); flush(); } });
+    });
+    // Campi speciali: tagsCsv → array, followUpDate → timestamp
+    document.querySelectorAll("[data-field-special]").forEach((el) => {
+      el.addEventListener("input", () => {
+        const k = el.dataset.fieldSpecial;
+        if (k === "tagsCsv") {
+          pending.tags = el.value.split(",").map((t) => t.trim()).filter(Boolean);
+        } else if (k === "followUpDate") {
+          pending.followUpAt = el.value ? new Date(el.value + "T12:00:00").getTime() : null;
+        }
+        debounce();
+      });
+      el.addEventListener("blur", () => { if (saveTimer) { clearTimeout(saveTimer); flush(); } });
+    });
+
+    // ==== AGGIUNGI INTERAZIONE ====
+    const intForm = document.getElementById("int-form");
+    intForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("int-err");
+      errEl.classList.add("hidden");
+      const fd = new FormData(intForm);
+      const dateStr = String(fd.get("happenedAt") || "");
+      const happenedAt = dateStr ? new Date(dateStr + "T12:00:00").getTime() : Date.now();
+      const payload = {
+        kind: fd.get("kind"),
+        subject: fd.get("subject") || null,
+        notes: fd.get("notes") || null,
+        happenedAt,
+      };
+      try {
+        const r = await fetch(`/api/contatti/${contactId}/interactions`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || "Errore");
+        // Recarico per mostrare la nuova interazione + last_interaction_at
+        window.location.reload();
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.remove("hidden");
+      }
+    });
+
+    // ==== DELETE INTERAZIONE ====
+    document.getElementById("int-list")?.addEventListener("click", async (e) => {
+      const btn = e.target?.dataset?.delInt ? e.target : null;
+      if (!btn) return;
+      if (!confirm("Eliminare questa interazione?")) return;
+      const iid = btn.dataset.delInt;
+      const r = await fetch(`/api/contatti/interactions/${iid}`, { method: "DELETE" });
+      if (r.ok) window.location.reload();
+    });
+
+    // ==== DELETE CONTATTO ====
+    document.getElementById("delete-btn")?.addEventListener("click", async () => {
+      if (!confirm("Eliminare il contatto e tutte le sue interazioni? Operazione irreversibile.")) return;
+      const r = await fetch(`/api/contatti/${contactId}`, { method: "DELETE" });
+      const j = await r.json();
+      if (r.ok && j.ok) window.location.href = "/area-soci/contatti";
+      else alert("Errore: " + (j.error || r.status));
+    });
+  </script>
+</AreaSociLayout>

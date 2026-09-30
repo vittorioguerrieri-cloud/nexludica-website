@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { getDb, getEnv } from "../../../server/db";
 import { createMagicLink, findUserByEmail } from "../../../server/auth";
 import { magicLinkEmail, sendEmail } from "../../../server/email";
+import { checkAndRecordAttempt } from "../../../server/rate-limit";
 
 export const prerender = false;
 
@@ -10,6 +11,14 @@ export const POST: APIRoute = async (ctx) => {
   const db = getDb(env);
   if (!db) {
     return json({ ok: false, error: "Backend non configurato (D1 mancante)" }, 503);
+  }
+
+  // Rate limit: max 8 magic link richiesti/ora per IP. Protegge contro:
+  //  - email spam (l'attaccante fa partire 100 email a indirizzi a caso)
+  //  - enumeration via timing oracle
+  const rl = await checkAndRecordAttempt(db, ctx.request, "magic-link", { max: 8 });
+  if (!rl.ok) {
+    return json({ ok: false, error: "Troppe richieste di magic link. Riprova fra un'ora." }, 429);
   }
 
   let email = "";
@@ -43,11 +52,17 @@ export const POST: APIRoute = async (ctx) => {
   msg.to = user.email;
   const result = await sendEmail(env, msg);
 
-  // Se siamo in dev (no API key), ritorna il link nel response per testare.
+  // Espone devLink SOLO se siamo esplicitamente in dev mode.
+  // In produzione, anche se RESEND_API_KEY mancasse per errore, MAI esporre
+  // il link nel response (sarebbe takeover account).
+  const isDev =
+    (env as unknown as { ENVIRONMENT?: string }).ENVIRONMENT === "development" ||
+    ctx.url.hostname === "localhost" ||
+    ctx.url.hostname.endsWith(".workers.dev");
   return json({
     ok: result.ok,
     sent: result.ok,
-    devLink: result.loggedOnly ? link : null,
+    devLink: result.loggedOnly && isDev ? link : null,
     error: result.ok ? undefined : result.error,
   });
 };

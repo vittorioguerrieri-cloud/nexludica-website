@@ -1,0 +1,227 @@
+---
+/**
+ * Stampa tavole OMNI in formato A5 (2 per A4).
+ *
+ * Layout: 2 card A5 per foglio A4 portrait (210×297mm).
+ * Ogni card ha 4 colonne (Ottimo / Modificare / Non Chiaro / Idee Nuove)
+ * pronte da compilare a mano durante il debrief.
+ *
+ * Query string opzionali:
+ *   ?n=4 → genera 4 card (2 fogli A4). Default 2.
+ *   ?game=warfables → mette il nome del gioco come sottotitolo.
+ */
+import { getDb, getEnv } from "../../../server/db";
+import { getUser } from "../../../server/guards";
+import { getGameBySlug } from "../../../server/playtest";
+
+export const prerender = false;
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const user = await getUser(Astro);
+if (!user) {
+  const nextUrl = encodeURIComponent(new URL(Astro.request.url).toString());
+  return Astro.redirect(`https://nexludica.org/login?next=${nextUrl}`);
+}
+
+const env = await getEnv();
+const db = getDb(env as Env);
+
+const url = new URL(Astro.request.url);
+const nRaw = Number(url.searchParams.get("n") ?? "2");
+const n = Math.max(1, Math.min(20, Number.isFinite(nRaw) ? Math.round(nRaw) : 2));
+const gameSlug = url.searchParams.get("game");
+
+let gameName: string | null = null;
+if (db && gameSlug) {
+  const g = await getGameBySlug(db, gameSlug);
+  if (g) gameName = g.name;
+}
+
+const cards = Array.from({ length: n }, (_, i) => i + 1);
+---
+
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tavole OMNI {gameName ? `— ${gameName}` : ""}</title>
+    <meta name="robots" content="noindex" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --omni-cyan: #05abc4;
+        --omni-dark: #1b2528;
+        --omni-gray: #888;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; font-family: 'Montserrat', system-ui, sans-serif; color: var(--omni-dark); background: #eee; }
+
+      /* === Screen-only controls (toolbar) === */
+      .toolbar {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center;
+        padding: 12px 16px; background: #fff; border-bottom: 1px solid #ddd;
+      }
+      .toolbar button, .toolbar a {
+        background: var(--omni-cyan); color: #fff; border: none; padding: 8px 18px;
+        font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        border-radius: 6px; cursor: pointer; text-decoration: none;
+      }
+      .toolbar a.secondary { background: transparent; color: var(--omni-dark); border: 1px solid #ccc; }
+      .toolbar .hint { font-size: 12px; color: var(--omni-gray); }
+
+      /* === Page (A4) === */
+      .page {
+        width: 210mm;
+        height: 297mm;
+        margin: 12mm auto;
+        padding: 10mm 10mm;
+        background: #fff;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        display: flex; flex-direction: column;
+        gap: 8mm;
+        page-break-after: always;
+      }
+      .page:last-child { page-break-after: auto; }
+
+      /* === Card (A5) === */
+      .card {
+        flex: 1 1 0;
+        min-height: 0;
+        border: 2px solid var(--omni-dark);
+        border-radius: 6px;
+        padding: 6mm 7mm;
+        display: flex; flex-direction: column;
+      }
+      .card-header {
+        display: flex; justify-content: space-between; align-items: baseline;
+        margin-bottom: 4mm;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 2mm;
+      }
+      .card-title {
+        font-size: 16pt; font-weight: 800; letter-spacing: 0.05em; margin: 0;
+      }
+      .card-sub {
+        font-size: 9pt; color: var(--omni-gray); text-transform: uppercase; letter-spacing: 0.15em;
+      }
+      .card-meta {
+        display: flex; gap: 8mm; font-size: 9pt; color: var(--omni-gray); margin-bottom: 3mm;
+      }
+      .card-meta span b { color: var(--omni-dark); font-weight: 600; }
+
+      .cols {
+        flex: 1 1 0;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 3mm;
+        min-height: 0;
+      }
+      .col {
+        display: flex; flex-direction: column;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .col-head {
+        background: var(--omni-cyan);
+        color: #fff;
+        padding: 2mm 3mm;
+        font-size: 10pt;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        text-align: center;
+      }
+      .col-head .icon {
+        display: block; font-size: 14pt; line-height: 1;
+        margin-bottom: 1mm;
+      }
+      .col-body {
+        flex: 1 1 0;
+        padding: 2mm 3mm;
+        /* Linee guida orizzontali per scrittura ordinata */
+        background-image: linear-gradient(to bottom, transparent 7mm, #eee 7mm, #eee calc(7mm + 0.3mm), transparent calc(7mm + 0.3mm));
+        background-size: 100% 7mm;
+        background-repeat: repeat-y;
+      }
+
+      .card-foot {
+        margin-top: 3mm;
+        padding-top: 2mm;
+        border-top: 1px dashed #ccc;
+        font-size: 7.5pt; color: var(--omni-gray);
+        text-align: center;
+        letter-spacing: 0.05em;
+      }
+
+      /* === Print rules === */
+      @media print {
+        body { background: #fff; }
+        .toolbar { display: none; }
+        .page {
+          margin: 0;
+          box-shadow: none;
+          padding: 8mm;
+        }
+        @page {
+          size: A4 portrait;
+          margin: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toolbar">
+      <button onclick="window.print()">Stampa</button>
+      <a href="?n=2" class="secondary">2 card (1 foglio)</a>
+      <a href="?n=4" class="secondary">4 card (2 fogli)</a>
+      <a href="?n=6" class="secondary">6 card (3 fogli)</a>
+      <a href={gameSlug ? `/giochi/${gameSlug}` : "/"} class="secondary">← Torna indietro</a>
+      <span class="hint">Suggerimento: nel dialog di stampa disabilita header/footer e margini stretti.</span>
+    </div>
+
+    {/* Renderizza in chunk di 2 card per pagina A4 */}
+    {Array.from({ length: Math.ceil(cards.length / 2) }, (_, p) => (
+      <div class="page">
+        {cards.slice(p * 2, p * 2 + 2).map(() => (
+          <div class="card">
+            <div class="card-header">
+              <h1 class="card-title">OMNI</h1>
+              <span class="card-sub">
+                {gameName ? gameName : "Playtest NexLudica"}
+              </span>
+            </div>
+            <div class="card-meta">
+              <span><b>Nome:</b> _____________________</span>
+              <span><b>Data:</b> ___ / ___ / _______</span>
+            </div>
+            <div class="cols">
+              <div class="col">
+                <div class="col-head">Ottimo</div>
+                <div class="col-body"></div>
+              </div>
+              <div class="col">
+                <div class="col-head">Modificare</div>
+                <div class="col-body"></div>
+              </div>
+              <div class="col">
+                <div class="col-head">Non chiaro</div>
+                <div class="col-body"></div>
+              </div>
+              <div class="col">
+                <div class="col-head">Idee nuove</div>
+                <div class="col-body"></div>
+              </div>
+            </div>
+            <div class="card-foot">
+              NexLudica APS · playtest.nexludica.org
+            </div>
+          </div>
+        ))}
+      </div>
+    ))}
+  </body>
+</html>

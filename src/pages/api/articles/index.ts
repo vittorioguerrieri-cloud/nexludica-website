@@ -3,6 +3,7 @@ import { getDb, getEnv } from "../../../server/db";
 import { loadUserFromContext } from "../../../server/auth";
 import {
   createArticle,
+  getArticleLinkInfo,
   listMyArticles,
   listPublishedArticles,
   uploadArticleDocument,
@@ -33,7 +34,45 @@ export const POST: APIRoute = async (ctx) => {
   const user = await loadUserFromContext(ctx);
   if (!user) return json({ error: "unauthorized" }, 401);
 
-  // Atteso multipart/form-data per supportare file upload.
+  const contentType = ctx.request.headers.get("content-type") ?? "";
+
+  // -------- Flusso markdown (JSON): titolo/relatore/data + corpo markdown.
+  // È il flusso principale: l'articolo nasce come bozza, poi l'autore lo
+  // rifinisce e pubblica dall'editor markdown (link di modifica).
+  if (contentType.includes("application/json")) {
+    const b = (await ctx.request.json().catch(() => ({}))) as Record<string, unknown>;
+    const title = String(b.title ?? "").trim();
+    const speaker = String(b.speaker ?? "").trim();
+    const meetingDate = String(b.meetingDate ?? b.date ?? "").trim();
+    const abstract = String(b.abstract ?? "").trim();
+    const tagsRaw = String(b.tags ?? "").trim();
+    const videoUrl = String(b.videoUrl ?? "").trim();
+    const body = b.body != null ? String(b.body) : null;
+    const status = (b.status === "published" ? "published" : "draft") as "draft" | "published";
+
+    if (!title || !speaker || !meetingDate) {
+      return json({ error: "Campi obbligatori mancanti (title, speaker, meetingDate)" }, 400);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate)) {
+      return json({ error: "meetingDate deve essere YYYY-MM-DD" }, 400);
+    }
+    try {
+      const id = await createArticle(db, user.id, {
+        title, speaker, meetingDate, abstract,
+        tags: tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [],
+        videoUrl: videoUrl || undefined,
+        body,
+        status,
+      });
+      const link = await getArticleLinkInfo(db, id);
+      return json({ ok: true, id, editToken: link?.editToken ?? null, slug: link?.slug ?? null });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return json({ error: "Errore creazione articolo: " + msg }, 500);
+    }
+  }
+
+  // -------- Flusso legacy (multipart con PDF allegato), mantenuto per compat.
   const fd = await ctx.request.formData();
   const title = String(fd.get("title") ?? "").trim();
   const speaker = String(fd.get("speaker") ?? "").trim();
@@ -65,18 +104,31 @@ export const POST: APIRoute = async (ctx) => {
     documentFilename = r.filename;
   }
 
-  const id = await createArticle(db, user.id, {
-    title,
-    speaker,
-    meetingDate,
-    abstract,
-    tags: tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [],
-    documentKey,
-    documentFilename,
-    videoUrl: videoUrl || undefined,
-    status,
-  });
-  return json({ ok: true, id });
+  // Se l'INSERT in DB fallisce dopo l'upload R2, cancelliamo il PDF caricato
+  // per non lasciare file orfani su R2 senza riferimento DB.
+  try {
+    const id = await createArticle(db, user.id, {
+      title,
+      speaker,
+      meetingDate,
+      abstract,
+      tags: tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [],
+      documentKey,
+      documentFilename,
+      videoUrl: videoUrl || undefined,
+      status,
+    });
+    const link = await getArticleLinkInfo(db, id);
+    return json({ ok: true, id, editToken: link?.editToken ?? null, slug: link?.slug ?? null });
+  } catch (e) {
+    if (documentKey) {
+      try { await storage.delete(documentKey); } catch (cleanupErr) {
+        console.error("[articles] R2 orphan cleanup failed:", cleanupErr);
+      }
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return json({ error: "Errore creazione articolo: " + msg }, 500);
+  }
 };
 
 function json(data: unknown, status = 200) {

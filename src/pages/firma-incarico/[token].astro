@@ -1,0 +1,130 @@
+---
+/**
+ * Pagina pubblica di firma della lettera d'incarico (SES, via token).
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getDb, getEnv } from "../../server/db";
+import { getIncaricoByToken, getIncaricoForPdf } from "../../server/incarichi";
+
+export const prerender = false;
+
+const { token } = Astro.params;
+const env = await getEnv();
+const db = getDb(env as Env);
+const base = (db && token) ? await getIncaricoByToken(db, token) : null;
+const inc = base ? await getIncaricoForPdf(db!, base.id) : null;
+const alreadySigned = inc?.status === "signed";
+---
+
+<BaseLayout title="Firma lettera d'incarico — NexLudica" description="Firma elettronica della lettera d'incarico">
+  <section class="mx-auto max-w-3xl px-4 pb-24 pt-28 lg:pt-32">
+    {!inc ? (
+      <div class="rounded-xl border border-nx-gray-light/30 bg-white p-8 text-center">
+        <h1 class="text-2xl font-black text-nx-dark">Link non valido</h1>
+        <p class="mt-3 text-nx-gray-dark">Questo link di firma non è valido o è stato revocato. Scrivi a <a href="mailto:info@nexludica.org" class="text-nx-cyan no-underline hover:underline">info@nexludica.org</a>.</p>
+      </div>
+    ) : alreadySigned ? (
+      <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-8 text-center">
+        <h1 class="text-2xl font-black text-nx-dark">Lettera già firmata ✓</h1>
+        <p class="mt-3 text-nx-gray-dark">Grazie {inc.person_name}. La lettera d'incarico è stata firmata.</p>
+        <a href={`/api/firma-incarico/${token}/pdf`} target="_blank" rel="noopener" class="mt-4 inline-block rounded-lg bg-nx-cyan px-5 py-2.5 text-sm font-bold uppercase tracking-wider text-white no-underline hover:bg-nx-blue">Scarica il PDF firmato</a>
+      </div>
+    ) : (
+      <div>
+        <h1 class="text-2xl font-black text-nx-dark">Lettera d'incarico — {inc.project_label}</h1>
+        <p class="mt-1 text-sm text-nx-gray-dark">Gentile <strong>{inc.person_name}</strong>, leggi il documento e firmalo per accettazione.</p>
+
+        <div class="mt-5 overflow-hidden rounded-xl border border-nx-gray-light/30">
+          <iframe src={`/api/firma-incarico/${token}/pdf`} class="h-[60vh] w-full" title="Lettera d'incarico"></iframe>
+        </div>
+
+        <form id="sign-form" class="mt-6 space-y-5 rounded-xl border border-nx-gray-light/30 bg-white p-6">
+          <div>
+            <label class="block text-sm font-medium text-nx-dark">Nome e cognome (per firma)</label>
+            <input id="typed" name="typed" required maxlength="80" value={inc.person_name}
+              class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm" />
+          </div>
+
+          <div>
+            <p class="text-sm font-medium text-nx-dark">Firma (disegna qui sotto — opzionale ma consigliata)</p>
+            <div class="mt-1 rounded-lg border border-nx-gray-light/40 bg-white">
+              <canvas id="sigpad" class="block w-full touch-none rounded-lg" style="height:160px;"></canvas>
+            </div>
+            <button type="button" id="sig-clear" class="mt-1 text-xs font-semibold text-nx-gray-dark hover:text-red-600">Cancella firma</button>
+          </div>
+
+          <label class="flex items-start gap-3 rounded-lg bg-nx-off-white p-4 text-sm">
+            <input type="checkbox" id="consent" class="mt-0.5 h-5 w-5 shrink-0 rounded border-nx-gray-light/40 text-nx-cyan" />
+            <span class="text-nx-gray-dark">
+              Dichiaro di aver letto la lettera d'incarico e di accettarla. Acconsento che la mia firma elettronica,
+              registrata con audit trail (data/ora, hash dell'indirizzo IP, user agent), abbia valore di firma elettronica
+              semplice ai sensi dell'art. 25 del Reg. eIDAS 910/2014. Il documento sarà conservato da NexLudica APS
+              (C.F. 95252550108).
+            </span>
+          </label>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <button type="submit" id="sign-btn" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-md hover:bg-nx-blue disabled:opacity-50">Firma per accettazione</button>
+            <span id="sign-status" class="text-sm"></span>
+          </div>
+        </form>
+      </div>
+    )}
+  </section>
+</BaseLayout>
+
+{inc && !alreadySigned && (
+  <script is:inline define:vars={{ token }}>
+    (function () {
+      // Signature pad
+      const canvas = document.getElementById("sigpad");
+      const clearBtn = document.getElementById("sig-clear");
+      let drawing = false, hasDrawn = false, ctx;
+      function resize() {
+        const ratio = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * ratio;
+        canvas.height = rect.height * ratio;
+        ctx = canvas.getContext("2d");
+        ctx.scale(ratio, ratio);
+        ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#1b2528";
+      }
+      setTimeout(resize, 50);
+      window.addEventListener("resize", resize);
+      function pos(e) {
+        const r = canvas.getBoundingClientRect();
+        const t = e.touches ? e.touches[0] : e;
+        return { x: t.clientX - r.left, y: t.clientY - r.top };
+      }
+      function start(e) { drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); e.preventDefault(); }
+      function move(e) { if (!drawing) return; const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); hasDrawn = true; e.preventDefault(); }
+      function end() { drawing = false; }
+      canvas.addEventListener("mousedown", start); canvas.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
+      canvas.addEventListener("touchstart", start, { passive: false }); canvas.addEventListener("touchmove", move, { passive: false }); canvas.addEventListener("touchend", end);
+      clearBtn.addEventListener("click", () => { ctx.clearRect(0, 0, canvas.width, canvas.height); hasDrawn = false; });
+
+      const form = document.getElementById("sign-form");
+      const btn = document.getElementById("sign-btn");
+      const statusEl = document.getElementById("sign-status");
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const typed = document.getElementById("typed").value.trim();
+        const consent = document.getElementById("consent").checked;
+        if (!typed) { statusEl.textContent = "Inserisci nome e cognome"; statusEl.className = "text-sm text-red-600"; return; }
+        if (!consent) { statusEl.textContent = "Devi accettare il consenso"; statusEl.className = "text-sm text-red-600"; return; }
+        const payload = { typedSignature: typed, consent: true };
+        if (hasDrawn) { payload.imageSignatureData = canvas.toDataURL("image/png"); payload.signatureMethod = "drawn"; }
+        btn.disabled = true; statusEl.textContent = "Firma in corso…"; statusEl.className = "text-sm text-nx-gray-dark";
+        try {
+          const res = await fetch("/api/firma-incarico/" + encodeURIComponent(token), {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+          });
+          const d = await res.json();
+          if (!res.ok || !d.ok) { statusEl.textContent = "✗ " + (d.error || res.status); statusEl.className = "text-sm text-red-600"; btn.disabled = false; return; }
+          statusEl.textContent = "✓ Firmato. Grazie!"; statusEl.className = "text-sm font-semibold text-emerald-600";
+          setTimeout(() => location.reload(), 1200);
+        } catch (e) { statusEl.textContent = "Errore di rete"; statusEl.className = "text-sm text-red-600"; btn.disabled = false; }
+      });
+    })();
+  </script>
+)}

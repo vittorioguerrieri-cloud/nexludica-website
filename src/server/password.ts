@@ -73,11 +73,34 @@ export async function verifyPassword(
   return diff === 0;
 }
 
+// Lista di password notoriamente compromesse / banali. Non esaustiva, ma
+// blocca i casi piu' ovvi: "password", "12345678", "qwerty1!", ecc.
+// Per una protezione vera, integrare check su haveibeenpwned (k-anonymity API)
+// o usare zxcvbn. Per ora: blocchiamo "molto comuni".
+const COMMON_PASSWORDS = new Set<string>([
+  "password", "passw0rd", "password1", "password123",
+  "12345678", "123456789", "1234567890",
+  "qwerty12", "qwertyui", "qwerty123",
+  "abc12345", "letmein1", "iloveyou",
+  "admin123", "administrator",
+  "nexludica", "nexludica1", "nexludica123",
+]);
+
 /**
  * Validazione minima della password (frontend e backend).
+ * Requisiti:
+ *  - 8-200 caratteri
+ *  - Almeno una lettera E almeno un numero (riduce attacchi di base)
+ *  - Non in lista comune
  */
 export function validatePasswordStrength(password: string): string | null {
   if (password.length < 8) return "La password deve essere di almeno 8 caratteri.";
   if (password.length > 200) return "Password troppo lunga.";
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return "La password deve contenere almeno una lettera e un numero.";
+  }
+  if (COMMON_PASSWORDS.has(password.toLowerCase())) {
+    return "Questa password e' troppo comune. Scegline una piu' originale.";
+  }
   return null;
 }

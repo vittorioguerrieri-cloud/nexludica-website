@@ -1,6 +1,29 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 
+// Giochi da tavolo che NexLudica sostiene attivamente.
+// I logo vanno droppati in public/images/games/ con i nomi indicati sotto.
+const giochiSostenuti = [
+  {
+    title: "Pink*",
+    subtitle: "Un gioco da ragazze?",
+    description:
+      "Gioco da tavolo transfemminista sulle discriminazioni di genere, ideato da Valeria Cammarosano, Benedetta Francioni e Letizia Vaccarella. Affronta disparità e violenza di genere attraverso il gioco, partendo dall'idea che informazione ed educazione siano i primi passi per cambiare. NexLudica ne cura promozione e distribuzione.",
+    logo: "/images/games/pink.png",
+    logoBg: "#E5187E",
+    link: "https://www.pinkers.it/",
+    linkLabel: "pinkers.it",
+  },
+  {
+    title: "WarFables",
+    subtitle: "Skirmish · Wargame a squadre",
+    description:
+      "Wargame skirmish a squadre in cui due gruppi di eroi si scontrano per completare una missione, ideato da Marco Monteverde, Simone Glogowschek e Vittorio Guerrieri. NexLudica lo utilizza come strumento per favorire la reintegrazione sociale delle persone più fragili, e ne cura promozione, produzione e distribuzione.",
+    logo: "/images/games/warfables.jpg",
+    logoBg: "#f5f5f4",
+  },
+];
+
 const progetti = [
   {
     title: "Wanderer's Quest",
@@ -18,7 +41,7 @@ const progetti = [
     title: "Giochi al Pesto",
     tagline: "Eventi · Inclusione · Genova",
     status: "Attivo",
-    description: "Serate di gioco da tavolo e gioco di ruolo gratuite e aperte a tutti, in diverse sedi della città metropolitana di Genova. Il progetto bandiera di NexLudica per riconnettere il tessuto sociale giovanile attraverso il gioco.",
+    description: "Serate di gioco da tavolo e gioco di ruolo gratuite, aperte a chiunque, in diverse sedi della città metropolitana di Genova. Il progetto bandiera di NexLudica per riconnettere il tessuto sociale giovanile attraverso il gioco.",
     partners: ["Centro di Solidarietà di Genova"],
     link: "https://giochialpesto.it",
   },
@@ -26,7 +49,7 @@ const progetti = [
     title: "MeetLudica",
     tagline: "Network scientifico",
     status: "Attivo",
-    description: "Incontro mensile online che riunisce ricercatori sul gioco da tavolo. Ogni ultimo giovedì del mese alle 19:00: 30 minuti di presentazione di un progetto di ricerca in corso, seguiti da un'ora di confronto e discussione. L'iniziativa mira a rendere la ricerca ludica più accessibile e a favorire la connessione tra ricercatrici e ricercatori.",
+    description: "Incontro mensile online che riunisce chi fa ricerca sul gioco da tavolo. Ogni ultimo giovedì del mese alle 19:00: 30 minuti di presentazione di un progetto di ricerca in corso, seguiti da un'ora di confronto e discussione. L'iniziativa mira a rendere la ricerca ludica più accessibile e a favorire le connessioni nella community di ricerca.",
     partners: [],
   },
   {
@@ -40,7 +63,7 @@ const progetti = [
 ];
 ---
 
-<BaseLayout title="Progetti — NexLudica APS" description="I progetti di NexLudica: Wanderer's Quest, Giochi al Pesto, MeetLudica. Ricerca, eventi e inclusione attraverso il gioco da tavolo.">
+<BaseLayout title="Progetti — NexLudica APS" description="I progetti di NexLudica: Wanderer's Quest, Giochi al Pesto, MeetLudica. Ricerca, eventi ed equità attraverso il gioco da tavolo.">
   <section class="nx-hero-pattern px-4 pb-16 pt-28 text-center">
     <h1 class="text-4xl font-extrabold text-nx-dark md:text-5xl" style="font-family: var(--font-display);">
       I nostri progetti
@@ -104,6 +127,54 @@ const progetti = [
               Visita il sito &rarr;
             </a>
           )}
+        </article>
+      ))}
+    </div>
+  </section>
+
+  <!-- Sezione: Giochi che sosteniamo (in fondo alla pagina) -->
+  <section class="mx-auto max-w-5xl px-4 pb-20">
+    <div class="mb-8">
+      <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">Partnership ludiche</p>
+      <h2 class="mt-2 text-2xl font-bold text-nx-dark sm:text-3xl" style="font-family: var(--font-display);">
+        Giochi da tavolo che sosteniamo
+      </h2>
+      <p class="mt-2 max-w-2xl text-sm text-nx-gray-dark">
+        Progetti ludici che condividono la nostra visione del gioco come strumento
+        di crescita ed equità, e che diffondiamo nelle nostre attivita'.
+      </p>
+    </div>
+    <div class="grid gap-6 sm:grid-cols-2">
+      {giochiSostenuti.map((g) => (
+        <article class="overflow-hidden rounded-xl border border-nx-gray-light/20 bg-white shadow-sm transition hover:shadow-md">
+          {/* Banner immagine assottigliato: object-fit:cover ritaglia top e
+              bottom per ottenere una fascia orizzontale piu' compatta. */}
+          <div class="relative w-full overflow-hidden" style={`background-color: ${g.logoBg}; height: 160px;`}>
+            <img
+              src={g.logo}
+              alt={`${g.title} logo`}
+              loading="lazy"
+              class="absolute inset-0 h-full w-full object-cover"
+              style="object-position: center;"
+            />
+          </div>
+          <div class="p-6">
+            <h3 class="text-xl font-bold text-nx-dark">{g.title}</h3>
+            {g.subtitle && (
+              <p class="mt-0.5 text-xs uppercase tracking-wider text-nx-cyan">{g.subtitle}</p>
+            )}
+            <p class="mt-3 text-sm text-nx-gray-dark leading-relaxed">{g.description}</p>
+            {g.link && (
+              <a
+                href={g.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-nx-cyan no-underline hover:underline"
+              >
+                {g.linkLabel ?? "Scopri di piu'"} &rarr;
+              </a>
+            )}
+          </div>
         </article>
       ))}
     </div>

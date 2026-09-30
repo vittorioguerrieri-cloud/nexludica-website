@@ -1,0 +1,212 @@
+---
+/**
+ * Catalogo miniature (MyMiniFactory → Drive condiviso "MMF Catalogo").
+ * Pagina statica, NON indicizzata e non linkata dal menu: raggiungibile solo via URL.
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import index from "../../data/mmf/index.json";
+import { MMF_BASE, fmtSize, r2, SOURCE_LABEL } from "../../lib/mmf";
+
+type Entry = (typeof index)[number];
+const items = index as Entry[];
+
+const creators = [...new Set(items.map((o) => o.creatorName ?? "—"))].sort((a, b) => a.localeCompare(b));
+const categories = [...new Set(items.flatMap((o) => o.categories))].sort((a, b) => a.localeCompare(b));
+const tagCount = new Map<string, number>();
+for (const o of items) for (const t of o.tags) tagCount.set(t, (tagCount.get(t) ?? 0) + 1);
+const topTags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([t]) => t);
+
+const totalSize = items.reduce((a, o) => a + o.size, 0);
+const totalStl = items.reduce((a, o) => a + o.nStl, 0);
+---
+
+<BaseLayout title="Catalogo miniature — NexLudica" description="Archivio interno delle miniature 3D." noindex={true}>
+  <section class="nx-hero-pattern px-4 pb-6 pt-20 sm:pb-10 sm:pt-24">
+    <div class="mx-auto max-w-6xl">
+      <p class="text-[10px] font-bold uppercase tracking-[0.3em] text-nx-cyan sm:text-xs">Archivio interno · non indicizzato</p>
+      <h1 class="mt-2 text-2xl font-extrabold text-nx-dark sm:text-3xl md:text-4xl" style="font-family: var(--font-display);">
+        Catalogo miniature
+      </h1>
+      <p class="mt-2 max-w-2xl text-sm text-nx-gray-dark sm:mt-3 sm:text-base">
+        {items.length} oggetti, {totalStl.toLocaleString("it-IT")} file STL, {fmtSize(totalSize)} di file
+        conservati sul Drive condiviso <em>MMF Catalogo</em>. Le foto sono quelle originali dello store, i render sono
+        generati automaticamente da ogni STL.
+      </p>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-4 pb-8 pt-4 sm:py-8">
+    <div class="sticky top-16 z-30 -mx-4 border-b border-nx-gray-light/30 bg-white/95 px-4 py-3 backdrop-blur">
+      <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+        <input
+          id="q"
+          type="search"
+          placeholder="Cerca per nome o tag…"
+          class="w-full min-w-48 flex-1 rounded-md border border-nx-gray-light/50 px-3 py-2 text-sm focus:border-nx-cyan focus:outline-none sm:w-auto"
+          autocomplete="off"
+        />
+        {/* Telefono: due colonne leggibili. Desktop: sm:contents scioglie la griglia e i campi
+            tornano in fila con la ricerca. */}
+        <div class="grid grid-cols-2 items-center gap-2 sm:contents">
+          <select id="creator" class="w-full min-w-0 rounded-md border border-nx-gray-light/50 bg-white px-3 py-2 text-sm sm:w-auto">
+            <option value="">Tutti i creator</option>
+            {creators.map((c) => <option value={c}>{c}</option>)}
+          </select>
+          <select id="category" class="w-full min-w-0 rounded-md border border-nx-gray-light/50 bg-white px-3 py-2 text-sm sm:w-auto">
+            <option value="">Tutte le categorie</option>
+            {categories.map((c) => <option value={c}>{c}</option>)}
+          </select>
+          <select id="sort" class="w-full min-w-0 rounded-md border border-nx-gray-light/50 bg-white px-3 py-2 text-sm sm:w-auto">
+            <option value="name">Ordina: nome</option>
+            <option value="added">Ordina: più recenti</option>
+            <option value="size">Ordina: dimensione</option>
+            <option value="stl">Ordina: n. STL</option>
+          </select>
+          <span id="count" class="text-sm text-nx-gray-dark"></span>
+        </div>
+      </div>
+      <div class="mt-2">
+        <div id="tags" class="flex flex-wrap gap-1.5">
+          {topTags.map((t) => (
+            <button type="button" data-tag={t} class="tag-chip rounded-full border border-nx-gray-light/40 px-2.5 py-0.5 text-xs text-nx-gray-dark hover:border-nx-cyan hover:text-nx-cyan">
+              {t}
+            </button>
+          ))}
+        </div>
+        <button type="button" id="tags-toggle" class="mt-1.5 text-xs font-semibold text-nx-cyan sm:hidden">
+          Mostra tutti i tag ({topTags.length})
+        </button>
+      </div>
+    </div>
+
+    <div id="grid" class="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+      {items.map((o) => (
+        <a
+          href={`${MMF_BASE}/${o.slug}/`}
+          class="card group flex flex-col overflow-hidden rounded-xl border border-nx-gray-light/20 bg-white no-underline shadow-sm transition hover:shadow-md"
+          data-name={o.name.toLowerCase()}
+          data-creator={o.creatorName ?? "—"}
+          data-categories={o.categories.join("|")}
+          data-tags={o.tags.join("|").toLowerCase()}
+          data-added={o.added}
+          data-size={o.size}
+          data-stl={o.nStl}
+        >
+          <div class="aspect-square w-full overflow-hidden bg-nx-off-white">
+            <img
+              src={r2(o.thumb)}
+              alt={o.name}
+              loading="lazy"
+              decoding="async"
+              width="480"
+              height="480"
+              class="h-full w-full object-cover transition group-hover:scale-[1.03]"
+            />
+          </div>
+          <div class="flex flex-1 flex-col p-3">
+            <p class="line-clamp-2 text-sm font-semibold leading-snug text-nx-dark">{o.name}</p>
+            <p class="mt-1 text-xs text-nx-cyan">{o.creatorName}</p>
+            <p class="mt-auto pt-2 text-[11px] text-nx-gray-dark">
+              {o.nStl} STL · {o.nFiles} file · {fmtSize(o.size)}
+              {o.source && <span class="ml-1 rounded bg-nx-off-white px-1.5 py-0.5">{SOURCE_LABEL[o.source] ?? o.source}</span>}
+            </p>
+          </div>
+        </a>
+      ))}
+    </div>
+    <p id="empty" class="mt-10 hidden text-center text-nx-gray-dark">Nessun oggetto corrisponde ai filtri.</p>
+  </section>
+</BaseLayout>
+
+<script>
+  const q = document.getElementById("q") as HTMLInputElement;
+  const creator = document.getElementById("creator") as HTMLSelectElement;
+  const category = document.getElementById("category") as HTMLSelectElement;
+  const sort = document.getElementById("sort") as HTMLSelectElement;
+  const count = document.getElementById("count")!;
+  const empty = document.getElementById("empty")!;
+  const grid = document.getElementById("grid")!;
+  const cards = [...grid.querySelectorAll<HTMLAnchorElement>(".card")];
+  const chips = [...document.querySelectorAll<HTMLButtonElement>(".tag-chip")];
+  let activeTag = "";
+
+  function apply() {
+    const text = q.value.trim().toLowerCase();
+    const c = creator.value;
+    const cat = category.value;
+    let shown = 0;
+    for (const el of cards) {
+      const d = el.dataset;
+      const ok =
+        (!text || d.name!.includes(text) || d.tags!.includes(text)) &&
+        (!c || d.creator === c) &&
+        (!cat || d.categories!.split("|").includes(cat)) &&
+        (!activeTag || d.tags!.split("|").includes(activeTag));
+      el.classList.toggle("hidden", !ok);
+      if (ok) shown++;
+    }
+    const key = sort.value;
+    const sorted = [...cards].sort((a, b) => {
+      if (key === "added") return (b.dataset.added ?? "").localeCompare(a.dataset.added ?? "");
+      if (key === "size") return Number(b.dataset.size) - Number(a.dataset.size);
+      if (key === "stl") return Number(b.dataset.stl) - Number(a.dataset.stl);
+      return a.dataset.name!.localeCompare(b.dataset.name!);
+    });
+    for (const el of sorted) grid.appendChild(el);
+    count.textContent = `${shown} / ${cards.length}`;
+    empty.classList.toggle("hidden", shown > 0);
+    const params = new URLSearchParams();
+    if (text) params.set("q", text);
+    if (c) params.set("creator", c);
+    if (cat) params.set("cat", cat);
+    if (activeTag) params.set("tag", activeTag);
+    if (key !== "name") params.set("sort", key);
+    history.replaceState(null, "", params.size ? `?${params}` : location.pathname);
+  }
+
+  for (const chip of chips) {
+    chip.addEventListener("click", () => {
+      activeTag = activeTag === chip.dataset.tag ? "" : chip.dataset.tag!;
+      for (const ch of chips) ch.classList.toggle("bg-nx-cyan", ch.dataset.tag === activeTag);
+      for (const ch of chips) ch.classList.toggle("text-white", ch.dataset.tag === activeTag);
+      apply();
+    });
+  }
+  q.addEventListener("input", apply);
+  creator.addEventListener("change", apply);
+  category.addEventListener("change", apply);
+  sort.addEventListener("change", apply);
+
+  // Su telefono la nuvola di tag coprirebbe tutta la schermata: chiusa, con un tocco si apre.
+  const tagsBox = document.getElementById("tags")!;
+  const tagsToggle = document.getElementById("tags-toggle");
+  tagsToggle?.addEventListener("click", () => {
+    const aperta = tagsBox.classList.toggle("tags-open");
+    tagsToggle.textContent = aperta ? "Mostra meno tag" : `Mostra tutti i tag (${chips.length})`;
+  });
+
+  const p = new URLSearchParams(location.search);
+  q.value = p.get("q") ?? "";
+  creator.value = p.get("creator") ?? "";
+  category.value = p.get("cat") ?? "";
+  sort.value = p.get("sort") ?? "name";
+  activeTag = p.get("tag") ?? "";
+  for (const ch of chips) {
+    ch.classList.toggle("bg-nx-cyan", ch.dataset.tag === activeTag);
+    ch.classList.toggle("text-white", ch.dataset.tag === activeTag);
+  }
+  apply();
+</script>
+
+<style>
+  /* Telefono: si vedono solo i primi tag, gli altri dietro il pulsante "Mostra tutti i tag". */
+  @media (max-width: 639px) {
+    #tags:not(.tags-open) .tag-chip:nth-of-type(n + 7) {
+      display: none;
+    }
+  }
+  /* Se il tag attivo e' oltre i primi, resta comunque visibile. */
+  #tags .tag-chip.bg-nx-cyan {
+    display: inline-block !important;
+  }
+</style>

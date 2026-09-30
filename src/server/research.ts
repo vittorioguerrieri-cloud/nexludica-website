@@ -20,6 +20,8 @@ export interface Study {
   anonymousCodeTemplate: string | null;
   identityFields: string[];          // splittato da CSV
   themeJson: string | null;
+  /** URL Prolific a cui rimandare il partecipante a fine compilazione, se reclutato via Prolific. */
+  prolificCompletionUrl: string | null;
   createdAt: number;
   updatedAt: number;
   createdBy: string | null;
@@ -67,6 +69,7 @@ function rowToStudy(r: Record<string, unknown>): Study {
       ? String(r.identity_fields).split(",").map((s) => s.trim()).filter(Boolean)
       : [],
     themeJson: (r.theme_json as string) ?? null,
+    prolificCompletionUrl: (r.prolific_completion_url as string) ?? null,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
     createdBy: (r.created_by as string) ?? null,
@@ -320,11 +323,19 @@ function buildAnonymousCode(
   });
 }
 
+// Alfabeto Crockford base32 senza ambigui (no I/L/O/U), case insensitive.
+// 8 caratteri = 32^8 = 2^40 ≈ 10^12 valori → collisione trascurabile.
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+
 function generateCompletionCode(): string {
-  // GR-XXXX-YYYY (8 char esadecimali in 2 gruppi)
-  const a = secureToken(2).replace(/[^A-Z0-9]/gi, "").slice(0, 4).toUpperCase().padEnd(4, "0");
-  const b = secureToken(2).replace(/[^A-Z0-9]/gi, "").slice(0, 4).toUpperCase().padEnd(4, "0");
-  return `NX-${a}-${b}`;
+  // NX-XXXX-YYYY usando 8 caratteri random dal nostro alfabeto.
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < 8; i++) {
+    out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  }
+  return `NX-${out.slice(0, 4)}-${out.slice(4, 8)}`;
 }
 
 export async function submitResponse(

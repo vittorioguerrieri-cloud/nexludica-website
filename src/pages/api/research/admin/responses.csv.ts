@@ -75,6 +75,12 @@ function formatValue(v: unknown): string {
 }
 function csvCell(s: string): string {
   if (s == null) return "";
-  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-  return s;
+  // CSV formula injection: celle che iniziano con =, +, -, @ vengono
+  // interpretate da Excel/LibreOffice come formule, permettendo code execution
+  // via DDE/macros. Prefissiamo con apostrofo che Excel ignora visivamente
+  // ma tratta come testo letterale.
+  let value = s;
+  if (/^[=+\-@\t\r]/.test(value)) value = "'" + value;
+  if (/[",\r\n]/.test(value)) return '"' + value.replace(/"/g, '""') + '"';
+  return value;
 }

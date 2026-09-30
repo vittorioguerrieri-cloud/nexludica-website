@@ -1,0 +1,110 @@
+---
+/**
+ * Viewer 3D per le mesh alleggerite del catalogo miniature (glb su R2).
+ * Si apre in un <dialog>; three.js viene caricato solo al primo click.
+ * Trigger: qualsiasi elemento con data-mesh="/r2/mmf/<id>/mesh/<n>.glb" e data-mesh-title.
+ */
+---
+
+<dialog id="mmf-viewer" class="w-[min(96vw,900px)] max-w-none rounded-xl p-0 shadow-2xl backdrop:bg-black/60" style="margin:auto; inset:0; position:fixed;">
+  <div class="flex items-center justify-between gap-3 border-b border-nx-gray-light/30 px-4 py-2">
+    <p id="mmf-viewer-title" class="truncate text-sm font-semibold text-nx-dark"></p>
+    <div class="flex items-center gap-3 text-xs text-nx-gray-dark">
+      <span class="hidden sm:inline">trascina per ruotare · rotella per zoom · tasto destro per spostare</span>
+      <button type="button" id="mmf-viewer-close" class="rounded-md border border-nx-gray-light/50 px-2 py-1 text-nx-dark hover:border-nx-cyan">Chiudi</button>
+    </div>
+  </div>
+  <div class="relative aspect-square w-full bg-nx-off-white sm:aspect-[4/3]">
+    <canvas id="mmf-viewer-canvas" class="h-full w-full"></canvas>
+    <p id="mmf-viewer-status" class="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 text-center text-sm text-nx-gray-dark"></p>
+  </div>
+</dialog>
+
+<script>
+  const dialog = document.getElementById("mmf-viewer") as HTMLDialogElement;
+  const canvas = document.getElementById("mmf-viewer-canvas") as HTMLCanvasElement;
+  const title = document.getElementById("mmf-viewer-title")!;
+  const status = document.getElementById("mmf-viewer-status")!;
+  document.getElementById("mmf-viewer-close")!.addEventListener("click", () => dialog.close());
+
+  let ctx: any = null; // { THREE, renderer, scene, camera, controls, GLTFLoader, current }
+
+  async function init() {
+    if (ctx) return ctx;
+    status.textContent = "Carico il viewer…";
+    const [THREE, { OrbitControls }, { GLTFLoader }] = await Promise.all([
+      import("three"),
+      import("three/examples/jsm/controls/OrbitControls.js"),
+      import("three/examples/jsm/loaders/GLTFLoader.js"),
+    ]);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 100);
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(1.5, 2.5, 2); scene.add(key);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-2.5, 0.5, 1); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xffffff, 1.0); rim.position.set(0, 2, -3); scene.add(rim);
+    const grid = new THREE.GridHelper(2, 10, 0xb4b4b4, 0xdde3e6);
+    scene.add(grid);
+    ctx = { THREE, renderer, scene, camera, controls, GLTFLoader, current: null, grid };
+    const loop = () => {
+      if (dialog.open) {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        if (canvas.width !== Math.floor(w * renderer.getPixelRatio()) || canvas.height !== Math.floor(h * renderer.getPixelRatio())) {
+          renderer.setSize(w, h, false);
+          camera.aspect = w / h; camera.updateProjectionMatrix();
+        }
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      requestAnimationFrame(loop);
+    };
+    loop();
+    return ctx;
+  }
+
+  async function open(url: string, label: string) {
+    title.textContent = label;
+    dialog.showModal();
+    const c = await init();
+    const { THREE, scene, camera, controls, grid } = c;
+    if (c.current) { scene.remove(c.current); c.current.traverse((o: any) => { o.geometry?.dispose(); o.material?.dispose(); }); c.current = null; }
+    status.textContent = "Carico il modello…";
+    try {
+      const gltf: any = await new Promise((res, rej) => new c.GLTFLoader().load(url, res, undefined, rej));
+      const root = gltf.scene;
+      const mat = new THREE.MeshStandardMaterial({ color: 0x7a8090, metalness: 0.05, roughness: 0.55, flatShading: false });
+      root.traverse((o: any) => { if (o.isMesh) { o.geometry.computeVertexNormals(); o.material = mat; } });
+      const box = new THREE.Box3().setFromObject(root);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const s = 1 / Math.max(size.x, size.y, size.z);
+      root.scale.setScalar(s);
+      root.position.set(-center.x * s, -box.min.y * s, -center.z * s); // appoggiato sulla griglia
+      scene.add(root);
+      c.current = root;
+      grid.position.y = 0;
+      const h = size.y * s;
+      controls.target.set(0, h / 2, 0);
+      const r = 0.5 * Math.hypot(size.x * s, size.y * s, size.z * s);
+      const dist = r / Math.sin((35 * Math.PI) / 360) * 1.05;
+      const el = (35 * Math.PI) / 180, az = (45 * Math.PI) / 180;
+      camera.position.set(dist * Math.cos(el) * Math.sin(az), h / 2 + dist * Math.sin(el), dist * Math.cos(el) * Math.cos(az));
+      controls.update();
+      status.textContent = "";
+    } catch (e) {
+      status.textContent = "Modello non disponibile.";
+      console.error(e);
+    }
+  }
+
+  document.addEventListener("click", (ev) => {
+    const el = (ev.target as HTMLElement).closest<HTMLElement>("[data-mesh]");
+    if (!el) return;
+    ev.preventDefault();
+    open(el.dataset.mesh!, el.dataset.meshTitle ?? "");
+  });
+</script>

@@ -1,0 +1,160 @@
+---
+/**
+ * Renderizza testi liberi (cv_academic, cv_other, descrizioni varie) con:
+ *  - "## Titolo"       → titolo di sezione (h4, color teal-700)
+ *  - ".elemento"       → elenco puntato con bullet ciano
+ *  - "- elemento"      → idem (sintassi markdown classica)
+ *  - Riga vuota        → break di paragrafo
+ *  - URL nel testo     → trasformati in <a target="_blank"> automaticamente
+ *  - Altro             → paragrafo normale
+ *
+ * Le righe vengono raggruppate in blocchi (heading / list / paragraph) e
+ * renderizzate con stili coerenti.
+ */
+interface Props {
+  text: string | null | undefined;
+  /** se true, aggiunge una spaziatura piu' compatta fra blocchi */
+  compact?: boolean;
+}
+
+type Block =
+  | { kind: "heading"; text: string }
+  | { kind: "list"; items: string[] }
+  | { kind: "paragraph"; text: string };
+
+function parseBlocks(input: string): Block[] {
+  const blocks: Block[] = [];
+  // Split in "paragrafi" usando linee vuote come separatore.
+  const paragraphs = input.split(/\n\s*\n/);
+  for (const para of paragraphs) {
+    const rawLines = para.split("\n").map((l) => l.trimEnd());
+    const lines = rawLines.filter((l) => l.trim().length > 0);
+    if (lines.length === 0) continue;
+    processGroup(lines, blocks);
+  }
+  return blocks;
+}
+
+/**
+ * Processa un gruppo di righe (paragrafo). Gestisce il caso in cui un
+ * paragrafo contenga MULTIPLE strutture (es. un "## Titolo" seguito da bullet
+ * sulla riga successiva, senza riga vuota intermedia).
+ */
+function processGroup(lines: string[], out: Block[]) {
+  if (lines.length === 0) return;
+  const first = lines[0].trimStart();
+
+  // 1) Heading isolato o all'inizio del gruppo
+  if (first.startsWith("## ")) {
+    out.push({ kind: "heading", text: first.slice(3).trim() });
+    if (lines.length > 1) processGroup(lines.slice(1), out);
+    return;
+  }
+
+  // 2) Lista: trova il prefisso piu' lungo di linee bullet a partire dall'inizio
+  const bulletRe = /^\s*[.\-]\s?/;
+  if (bulletRe.test(lines[0])) {
+    let i = 0;
+    while (i < lines.length && bulletRe.test(lines[i])) i++;
+    const items = lines.slice(0, i).map((l) => l.replace(bulletRe, "").trim());
+    out.push({ kind: "list", items });
+    if (i < lines.length) processGroup(lines.slice(i), out);
+    return;
+  }
+
+  // 3) Paragrafo: consuma tutte le linee NON-heading e NON-bullet fino al
+  //    primo separatore
+  let i = 0;
+  while (
+    i < lines.length &&
+    !lines[i].trimStart().startsWith("## ") &&
+    !bulletRe.test(lines[i])
+  ) {
+    i++;
+  }
+  out.push({ kind: "paragraph", text: lines.slice(0, i).join(" ") });
+  if (i < lines.length) processGroup(lines.slice(i), out);
+}
+
+/**
+ * Spezza una stringa in segmenti text / link basandosi su URL http(s).
+ * Ritorna un array di {type, value} che il template renderizza.
+ */
+type Segment = { type: "text"; value: string } | { type: "link"; href: string; value: string };
+const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/g;
+function splitWithLinks(s: string): Segment[] {
+  const out: Segment[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  URL_RE.lastIndex = 0;
+  while ((m = URL_RE.exec(s)) !== null) {
+    if (m.index > last) out.push({ type: "text", value: s.slice(last, m.index) });
+    let url = m[1];
+    // Rimuovi punteggiatura trailing comune (es. "url." → "url")
+    let trailing = "";
+    while (url.length > 0 && /[.,;:!?]/.test(url.charAt(url.length - 1))) {
+      trailing = url.charAt(url.length - 1) + trailing;
+      url = url.slice(0, -1);
+    }
+    out.push({ type: "link", href: url, value: url });
+    if (trailing) out.push({ type: "text", value: trailing });
+    last = m.index + m[1].length;
+  }
+  if (last < s.length) out.push({ type: "text", value: s.slice(last) });
+  return out;
+}
+
+const { text, compact = false } = Astro.props;
+const blocks: Block[] = text && text.trim() ? parseBlocks(text) : [];
+const gapClass = compact ? "space-y-3" : "space-y-4";
+---
+
+{blocks.length === 0 ? null : (
+  <div class={gapClass}>
+    {blocks.map((b) => {
+      if (b.kind === "heading") {
+        return (
+          <h4 class="text-sm font-bold uppercase tracking-wider text-nx-cyan">
+            {b.text}
+          </h4>
+        );
+      }
+      if (b.kind === "list") {
+        return (
+          <ul class="space-y-2.5">
+            {b.items.map((it) => (
+              <li class="flex items-start gap-3 text-sm leading-relaxed text-nx-gray-dark">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-nx-cyan"></span>
+                <span>
+                  {splitWithLinks(it).map((seg) =>
+                    seg.type === "link" ? (
+                      <a href={seg.href} target="_blank" rel="noopener noreferrer" class="text-nx-cyan no-underline hover:underline break-words">
+                        {seg.value}
+                      </a>
+                    ) : (
+                      <span>{seg.value}</span>
+                    ),
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        );
+      }
+      // paragraph
+      return (
+        <p class="text-sm leading-relaxed text-nx-gray-dark whitespace-pre-line">
+          {splitWithLinks(b.text).map((seg) =>
+            seg.type === "link" ? (
+              <a href={seg.href} target="_blank" rel="noopener noreferrer" class="text-nx-cyan no-underline hover:underline break-words">
+                {seg.value}
+              </a>
+            ) : (
+              <span>{seg.value}</span>
+            ),
+          )}
+        </p>
+      );
+    })}
+  </div>
+)}

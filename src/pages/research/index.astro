@@ -1,76 +1,146 @@
 ---
 import ResearchLayout from "../../layouts/ResearchLayout.astro";
 import { getDb, getEnv } from "../../server/db";
-import { listStudies, type Study } from "../../server/research";
+import { listStudies, listQuestionnaires, countResponses, type Study } from "../../server/research";
+import { getUser } from "../../server/guards";
 
 export const prerender = false;
 
-// Pagina dinamica: niente cache CDN per riflettere subito le modifiche su D1.
 Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
 
+const user = await getUser(Astro);
+if (!user || user.role !== "admin") {
+  return Astro.redirect("/no-access");
+}
+
 const env = await getEnv();
-const db = getDb(env as Env);
-let studies: Study[] = [];
-if (db) {
-  try {
-    studies = await listStudies(db, { onlyPublic: true, onlyActive: true });
-  } catch (e) {
-    console.error("[research] listStudies failed", e);
-  }
+const db = getDb(env as Env)!;
+
+const studies = await listStudies(db);
+
+type StudyOverview = {
+  study: Study;
+  totalResponses: number;
+  questionnaires: Array<{
+    id: string;
+    slug: string;
+    title: string;
+    status: string;
+    count: number;
+  }>;
+};
+
+const overviews: StudyOverview[] = [];
+for (const s of studies) {
+  const qs = await listQuestionnaires(db, s.id);
+  const counts = await countResponses(db, s.id);
+  const countMap = new Map(counts.map((c) => [c.questionnaireId, c.count]));
+  overviews.push({
+    study: s,
+    totalResponses: counts.reduce((sum, c) => sum + c.count, 0),
+    questionnaires: qs.map((q) => ({
+      id: q.id,
+      slug: q.slug,
+      title: q.title,
+      status: q.status,
+      count: countMap.get(q.id) ?? 0,
+    })),
+  });
 }
 ---
 
-<ResearchLayout title="NexLudica Research — Studi attivi">
+<ResearchLayout title="NexLudica Research — Admin">
   <section>
-    <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Studi di ricerca</p>
-    <h1 class="mt-4 text-4xl font-black tracking-tight text-nx-dark sm:text-5xl" style="font-family: var(--font-display);">
-      NexLudica Research
-    </h1>
-    <p class="mt-4 max-w-2xl text-lg text-nx-gray-dark">
-      La piattaforma di ricerca di NexLudica APS: questionari psicometrici per studiare
-      l'impatto del gioco da tavolo su benessere, dinamiche di gruppo e processi cognitivi.
-    </p>
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Admin dashboard</p>
+        <h1 class="mt-2 text-3xl font-black tracking-tight text-nx-dark sm:text-4xl" style="font-family: var(--font-display);">
+          NexLudica Research
+        </h1>
+        <p class="mt-2 text-sm text-nx-gray-dark">
+          Logged in as <span class="font-semibold text-nx-dark">{user.email}</span>.
+          I partecipanti accedono ai questionari solo tramite link diretto.
+        </p>
+      </div>
+      <a
+        href="/admin/responses"
+        class="rounded-lg bg-nx-cyan px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white no-underline shadow-sm transition hover:bg-nx-blue"
+      >
+        Responses →
+      </a>
+    </div>
   </section>
 
-  <section class="mt-12">
-    <h2 class="text-2xl font-bold text-nx-dark">Studi attivi</h2>
-    {studies.length === 0 ? (
-      <p class="mt-6 rounded-lg border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
-        Nessuno studio aperto al momento.
-      </p>
-    ) : (
-      <ul class="mt-6 grid gap-4 sm:grid-cols-2">
-        {studies.map((s) => (
-          <li>
-            <a
-              href={`/research/${s.slug}`}
-              class="block rounded-xl border border-nx-gray-light/20 bg-white p-6 no-underline transition hover:border-nx-cyan hover:shadow-md"
-            >
-              <p class="text-xs font-bold uppercase tracking-wider text-nx-cyan">Studio attivo</p>
-              <h3 class="mt-2 text-lg font-bold text-nx-dark">{s.title}</h3>
-              {s.description && (
-                <p class="mt-2 line-clamp-3 text-sm text-nx-gray-dark">{s.description}</p>
+  <section class="mt-10 space-y-6">
+    {overviews.map(({ study, totalResponses, questionnaires }) => (
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg font-bold text-nx-dark">{study.title}</h2>
+              <span class:list={[
+                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+                study.status === "active" ? "bg-green-100 text-green-700" : "bg-nx-gray-light/30 text-nx-gray-dark",
+              ]}>
+                {study.status}
+              </span>
+              {study.publicListing ? (
+                <span class="rounded-full bg-nx-cyan/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-nx-cyan">
+                  Public
+                </span>
+              ) : (
+                <span class="rounded-full bg-nx-gray-light/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">
+                  Private
+                </span>
               )}
-              <p class="mt-4 text-xs font-semibold text-nx-cyan">Vai allo studio →</p>
-            </a>
-          </li>
-        ))}
-      </ul>
-    )}
-  </section>
+            </div>
+            <p class="mt-1 font-mono text-xs text-nx-gray-dark">/{study.slug}</p>
+          </div>
+          <div class="text-right">
+            <p class="text-2xl font-black text-nx-cyan">{totalResponses}</p>
+            <p class="text-[10px] font-bold uppercase tracking-wider text-nx-gray-dark">responses</p>
+          </div>
+        </div>
 
-  <section class="mt-16 rounded-xl border border-nx-gray-light/20 bg-white p-6">
-    <h2 class="text-lg font-bold text-nx-dark">Sei un partecipante?</h2>
-    <p class="mt-2 text-sm text-nx-gray-dark">
-      Se hai ricevuto un link diretto via email, aprilo per accedere al questionario
-      specifico. Gli studi sono accessibili anche tramite link non listati qui.
-    </p>
-    <h3 class="mt-6 text-base font-bold text-nx-dark">Come tuteliamo la tua privacy</h3>
-    <ul class="mt-2 space-y-1 text-sm text-nx-gray-dark">
-      <li>• Non raccogliamo nome, cognome o dati anagrafici espliciti.</li>
-      <li>• Per ogni studio puoi avere un codice anonimo generato dai tuoi stessi dati: nessuno (nemmeno NexLudica) puo' risalire alla tua identita'.</li>
-      <li>• I dati sono conservati su server europei (Cloudflare D1).</li>
-      <li>• Trovi i dettagli completi nella <a href="/privacy-policy" class="text-nx-cyan no-underline hover:underline">privacy policy</a>.</li>
-    </ul>
+        {study.prolificCompletionUrl && (
+          <p class="mt-3 truncate text-xs text-nx-gray-dark">
+            <span class="font-semibold text-nx-dark">Prolific URL:</span>
+            <a href={study.prolificCompletionUrl} class="ml-1 text-nx-cyan no-underline hover:underline">{study.prolificCompletionUrl}</a>
+          </p>
+        )}
+
+        <div class="mt-4 space-y-2">
+          {questionnaires.map((q) => {
+            const directLink = `https://research.nexludica.org/${study.slug}/${q.slug}`;
+            return (
+              <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-nx-gray-light/10 bg-nx-off-white px-4 py-3">
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-semibold text-nx-dark">{q.title}</p>
+                  <p class="mt-0.5 truncate font-mono text-[11px] text-nx-gray-dark">{directLink}</p>
+                </div>
+                <div class="flex items-center gap-3 text-xs">
+                  <span class="text-nx-gray-dark">{q.count} resp.</span>
+                  <a
+                    href={`/${study.slug}/${q.slug}`}
+                    class="rounded-md border border-nx-cyan/40 px-3 py-1 font-semibold text-nx-cyan no-underline hover:bg-nx-cyan hover:text-white"
+                  >
+                    Open
+                  </a>
+                  <a
+                    href={`/admin/responses?study=${study.slug}`}
+                    class="rounded-md bg-nx-dark px-3 py-1 font-semibold text-white no-underline hover:bg-nx-blue"
+                  >
+                    Data
+                  </a>
+                </div>
+              </div>
+            );
+          })}
+          {questionnaires.length === 0 && (
+            <p class="text-xs italic text-nx-gray-dark">Nessun questionario.</p>
+          )}
+        </div>
+      </div>
+    ))}
   </section>
 </ResearchLayout>
