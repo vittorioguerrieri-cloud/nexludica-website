@@ -628,6 +628,79 @@ const UI = UI_TEXTS[lang];
       try {
         const schema = JSON.parse(schemaJson);
         const theme = JSON.parse(themeJson);
+
+        // === Blocchi in ordine casuale (schema con nx_shuffle_blocks: true) ===
+        // Le pagine con nx_block formano blocchi; quelle senza restano fisse prima e dopo.
+        // L'ordine dei blocchi è casuale per ogni partecipante, e dentro i blocchi elencati in
+        // nx_shuffle_within anche le pagine (tranne quelle con nx_block_fixed, come le
+        // istruzioni). Così chi abbandona lascia vuoti blocchi diversi, non sempre gli ultimi.
+        // Seme salvato nel browser (un ricaricamento non rimescola) e ordine nel payload.
+        // Le pagine con nx_section_title ricevono il titolo numerato secondo l'ordine reale,
+        // con il formato nx_section_format ("{k}", "{n}", "{title}").
+        let blockShuffleData = null;
+        try {
+          if (schema && schema.nx_shuffle_blocks === true && Array.isArray(schema.pages)) {
+            const SEED_KEY = "nx-block-seed:" + questionnaireId;
+            let seed = NaN;
+            try { seed = parseInt(localStorage.getItem(SEED_KEY) || "", 10); } catch (e) {}
+            if (!Number.isFinite(seed) || seed <= 0) {
+              const buf = new Uint32Array(1);
+              (window.crypto || window.msCrypto).getRandomValues(buf);
+              seed = buf[0] || 1;
+              try { localStorage.setItem(SEED_KEY, String(seed)); } catch (e) {}
+            }
+            let state = seed;
+            const rng = function () {
+              let t = (state += 0x6d2b79f5);
+              t = Math.imul(t ^ (t >>> 15), t | 1);
+              t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+            const shuffle = function (arr) {
+              for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(rng() * (i + 1));
+                const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+              }
+              return arr;
+            };
+            const pages = schema.pages;
+            const first = pages.findIndex(function (p) { return p.nx_block; });
+            let last = -1;
+            pages.forEach(function (p, i) { if (p.nx_block) last = i; });
+            if (first >= 0) {
+              const groups = [];
+              const byBlock = {};
+              pages.slice(first, last + 1).forEach(function (p) {
+                const b = p.nx_block || "_";
+                if (!byBlock[b]) { byBlock[b] = []; groups.push(b); }
+                byBlock[b].push(p);
+              });
+              (schema.nx_shuffle_within || []).forEach(function (b) {
+                if (!byBlock[b]) return;
+                const fixed = byBlock[b].filter(function (p) { return p.nx_block_fixed; });
+                const free = byBlock[b].filter(function (p) { return !p.nx_block_fixed; });
+                byBlock[b] = fixed.concat(shuffle(free));
+              });
+              shuffle(groups);
+              let middle = [];
+              groups.forEach(function (b) { middle = middle.concat(byBlock[b]); });
+              schema.pages = pages.slice(0, first).concat(middle, pages.slice(last + 1));
+              blockShuffleData = {
+                _block_seed: seed,
+                _block_order: groups,
+                _page_order: schema.pages.map(function (p) { return p.name; }),
+              };
+            }
+            const fmt = schema.nx_section_format || "{k}/{n} {title}";
+            const titled = schema.pages.filter(function (p) { return p.nx_section_title; });
+            titled.forEach(function (p, i) {
+              p.title = fmt.replace("{k}", String(i + 1)).replace("{n}", String(titled.length))
+                .replace("{title}", p.nx_section_title);
+            });
+          }
+        } catch (e) {
+          console.error("[nx-blocks] failed:", e);
+        }
         const Survey = window.SurveyUI || window.Survey;
         if (!Survey || !Survey.Model) {
           document.getElementById("submit-error").textContent = uiText.engineError;
@@ -635,6 +708,7 @@ const UI = UI_TEXTS[lang];
           return;
         }
         const survey = new Survey.Model(schema);
+        if (blockShuffleData) survey.mergeData(blockShuffleData);
         if (theme && Survey.SurveyModel) {
           survey.applyTheme(theme);
         } else if (survey.applyTheme) {
@@ -1417,16 +1491,32 @@ const UI = UI_TEXTS[lang];
             return q.isVisible && q.getType && STATIC_TYPES_SPEED.indexOf(q.getType()) === -1;
           });
         }
+        // L'avviso arriva solo dopo nx_speed_consecutive pagine di fila troppo veloci (default 1):
+        // una pagina a ritmo normale azzera il conto. Con nx_paradata le pagine troppo veloci
+        // finiscono comunque in `_speed_fast_pages`, utile per la pulizia dei dati.
+        const speedConsecutive = Math.max(1, Number(schema && schema.nx_speed_consecutive) || 1);
         let speedPrompted = !!survey.getValue("_speed_prompt_page");
+        let fastStreak = 0;
         survey.onCurrentPageChanging.add(function (sender, options) {
-          if (!wantsSpeedPrompt || speedPrompted || pageIsRevisit || options.allow === false) return;
+          if (!wantsSpeedPrompt || pageIsRevisit || options.allow === false) return;
           const oldPage = options.oldCurrentPage;
           const newPage = options.newCurrentPage;
           if (!oldPage || !newPage || newPage.visibleIndex <= oldPage.visibleIndex) return;
           if (!pageHasInput(oldPage)) return;
           const words = wordsOnPage(oldPage);
-          if (words < 5 || Date.now() - pageStartedAt >= words * msPerWord) return;
+          if (words < 5) return;
+          if (Date.now() - pageStartedAt >= words * msPerWord) { fastStreak = 0; return; }
+          fastStreak++;
+          if (wantsParadata) {
+            const fast = (survey.getValue("_speed_fast_pages") || []).slice();
+            if (fast.indexOf(oldPage.name) === -1) {
+              fast.push(oldPage.name);
+              survey.setValue("_speed_fast_pages", fast);
+            }
+          }
+          if (speedPrompted || fastStreak < speedConsecutive) return;
           speedPrompted = true;
+          fastStreak = 0;
           survey.setValue("_speed_prompt_page", oldPage.name);
           options.allow = false;
           document.getElementById("nx-speed-banner").classList.remove("hidden");
