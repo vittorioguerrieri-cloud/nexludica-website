@@ -121,7 +121,10 @@ const UI_TEXTS = {
 const UI = UI_TEXTS[lang];
 ---
 
-<ResearchLayout title={`${questionnaire.title} — ${study.title}`} fluid>
+<ResearchLayout
+  title={questionnaire.title === study.title ? study.title : `${questionnaire.title} — ${study.title}`}
+  fluid
+>
   <div>
     <p class="text-xs font-bold uppercase tracking-[0.3em] text-nx-cyan">{UI.label}</p>
     <h1 class="mt-2 text-2xl font-bold text-nx-dark sm:text-3xl">{questionnaire.title}</h1>
@@ -534,6 +537,81 @@ const UI = UI_TEXTS[lang];
       background-color: rgba(254, 202, 202, 0.55) !important;
       box-shadow: inset 4px 0 0 #ef4444, 0 0 0 1px rgba(239, 68, 68, 0.5) !important;
       transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    /* === 4. OPZIONI A CARD (schema con nx_choice_cards: true) ===
+       Le risposte a scelta singola diventano card affiancate da sinistra a destra,
+       su una sola riga. Se un'etichetta non ci sta (una parola esce dalla card o
+       servono più di due righe) la domanda passa in colonna: mai su due file. */
+    .nx-cards .sd-selectbase {
+      display: flex !important;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .nx-cards .sd-selectbase > .sd-item {
+      flex: 1 1 0;
+      min-width: 0;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .nx-cards .sd-item .sd-selectbase__label {
+      display: flex;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      padding: 12px 10px;
+      border: 2px solid #d5dde2;
+      border-radius: 10px;
+      background: #ffffff;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+    .nx-cards .sd-item__decorator {
+      display: none !important;
+    }
+    .nx-cards .sd-item__control-label {
+      display: block;
+      width: 100%;
+      margin: 0 !important;
+      padding: 0 !important;
+      white-space: normal;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+      line-height: 1.3;
+      text-align: inherit;
+    }
+    /* SurveyJS taglia le etichette con i puntini: nelle card il testo va mostrato per
+       intero, e se non ci sta la domanda passa in colonna. */
+    .nx-cards .sd-item__control-label .sv-string-viewer {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      text-align: inherit;
+    }
+    .nx-cards .sd-item:hover .sd-selectbase__label {
+      border-color: #05abc4;
+    }
+    .nx-cards .sd-item--checked .sd-selectbase__label {
+      border-color: #286181;
+      background: #e0f7fa;
+      color: #1a3d5c;
+      font-weight: 600;
+    }
+    .nx-cards .sd-selectbase__label:focus-within {
+      outline: 3px solid #05abc4;
+      outline-offset: 2px;
+    }
+    .nx-cards.nx-cards--vertical .sd-selectbase {
+      flex-direction: column;
+    }
+    .nx-cards.nx-cards--vertical .sd-item .sd-selectbase__label {
+      justify-content: flex-start;
+      text-align: left;
     }
   </style>
 
@@ -958,8 +1036,57 @@ const UI = UI_TEXTS[lang];
             if (t === "matrix" || t === "matrixdropdown" || t === "matrixdynamic") {
               setupMobileMatrix(q, options.htmlElement);
             }
+            if (wantsCards && t === "radiogroup") {
+              requestAnimationFrame(function () { fitCards(q, options.htmlElement); });
+            }
           }
         });
+
+        // === Opzioni a card (schema con nx_choice_cards: true) ===
+        // In riga se ogni etichetta ci sta (nessuna parola esce dalla card, al massimo
+        // due righe), altrimenti in colonna. Le classi passano dal modello SurveyJS
+        // (onUpdateQuestionCssClasses), così restano anche quando la domanda viene
+        // ridisegnata dopo una risposta. Si ricontrolla a ogni ridimensionamento e
+        // quando i font sono caricati, perché la larghezza delle parole cambia.
+        const wantsCards = !!(schema && schema.nx_choice_cards === true);
+        const cardsVertical = new Map();
+        survey.onUpdateQuestionCssClasses.add(function (sender, options) {
+          if (!wantsCards || options.question.getType() !== "radiogroup") return;
+          const extra = cardsVertical.get(options.question.name) ? " nx-cards nx-cards--vertical" : " nx-cards";
+          options.cssClasses.mainRoot = (options.cssClasses.mainRoot || "") + extra;
+        });
+        function fitCards(q, root) {
+          if (!q || !root || !root.isConnected) return;
+          root.classList.add("nx-cards");
+          root.classList.remove("nx-cards--vertical");
+          let fits = true;
+          root.querySelectorAll(".sd-item__control-label").forEach(function (label) {
+            const lineHeight = parseFloat(getComputedStyle(label).lineHeight) || 20;
+            const inner = label.querySelector(".sv-string-viewer") || label;
+            if (label.scrollWidth > label.clientWidth + 1 ||
+                inner.scrollWidth > inner.clientWidth + 1 ||
+                label.getBoundingClientRect().height > lineHeight * 2.5) fits = false;
+          });
+          if (!fits) root.classList.add("nx-cards--vertical");
+          if (cardsVertical.get(q.name) !== !fits) {
+            cardsVertical.set(q.name, !fits);
+            if (q.updateElementCss) q.updateElementCss(true);
+          }
+        }
+        function fitAllCards() {
+          const page = survey.currentPage;
+          (page ? page.questions : []).forEach(function (q) {
+            if (q.getType && q.getType() === "radiogroup") fitCards(q, questionDom.get(q.name));
+          });
+        }
+        if (wantsCards) {
+          let resizeTimer = null;
+          window.addEventListener("resize", function () {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(fitAllCards, 150);
+          });
+          if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAllCards);
+        }
 
         // === Probing per pagina ===
         // Al click di "Avanti" su una pagina con risposte mancanti (non-obb.),
@@ -1244,9 +1371,24 @@ const UI = UI_TEXTS[lang];
             touch: ("ontouchstart" in window) || (navigator.maxTouchPoints || 0) > 0,
           });
         }
+        // Una pagina riattraversata (dopo Indietro, o già tutta risposta quando la si riapre)
+        // si lascia in fretta per forza: il messaggio sulla velocità non deve scattare lì.
+        const visitedPages = new Set();
+        let pageIsRevisit = false;
+        function onPageShown(page) {
+          if (!page) return;
+          const inputs = (page.questions || []).filter(function (q) {
+            return q.isVisible && q.getType && STATIC_TYPES_SPEED.indexOf(q.getType()) === -1;
+          });
+          const allAnswered = inputs.length > 0 && inputs.every(function (q) { return !q.isEmpty(); });
+          pageIsRevisit = visitedPages.has(page.name) || allAnswered;
+          visitedPages.add(page.name);
+        }
+        onPageShown(survey.currentPage);
         survey.onCurrentPageChanged.add(function (sender, options) {
           addPageTime(options.oldCurrentPage);
           pageStartedAt = Date.now();
+          onPageShown(options.newCurrentPage);
         });
         survey.onCompleting.add(function (sender) {
           addPageTime(sender.currentPage);
@@ -1277,7 +1419,7 @@ const UI = UI_TEXTS[lang];
         }
         let speedPrompted = !!survey.getValue("_speed_prompt_page");
         survey.onCurrentPageChanging.add(function (sender, options) {
-          if (!wantsSpeedPrompt || speedPrompted || options.allow === false) return;
+          if (!wantsSpeedPrompt || speedPrompted || pageIsRevisit || options.allow === false) return;
           const oldPage = options.oldCurrentPage;
           const newPage = options.newCurrentPage;
           if (!oldPage || !newPage || newPage.visibleIndex <= oldPage.visibleIndex) return;
