@@ -691,10 +691,18 @@ const UI = UI_TEXTS[lang];
                 _page_order: schema.pages.map(function (p) { return p.name; }),
               };
             }
+            // Pagine con lo stesso nx_section_id (es. le varianti di forma A e B della prima
+            // pagina di una sezione) prendono lo stesso numero e contano una volta sola.
             const fmt = schema.nx_section_format || "{k}/{n} {title}";
             const titled = schema.pages.filter(function (p) { return p.nx_section_title; });
-            titled.forEach(function (p, i) {
-              p.title = fmt.replace("{k}", String(i + 1)).replace("{n}", String(titled.length))
+            const sectionIds = [];
+            titled.forEach(function (p) {
+              const id = p.nx_section_id || p.name;
+              if (sectionIds.indexOf(id) === -1) sectionIds.push(id);
+            });
+            titled.forEach(function (p) {
+              const k = sectionIds.indexOf(p.nx_section_id || p.name) + 1;
+              p.title = fmt.replace("{k}", String(k)).replace("{n}", String(sectionIds.length))
                 .replace("{title}", p.nx_section_title);
             });
           }
@@ -889,6 +897,9 @@ const UI = UI_TEXTS[lang];
         if (hasResumableData) {
           try {
             survey.data = saved.data;
+            // l'ordine dei blocchi (stesso seme, stesso ordine) deve restare nel payload anche
+            // se il salvataggio ripreso non lo conteneva
+            if (blockShuffleData) survey.mergeData(blockShuffleData);
             if (typeof saved.currentPageNo === "number" && saved.currentPageNo > 0) {
               survey.currentPageNo = saved.currentPageNo;
             }
