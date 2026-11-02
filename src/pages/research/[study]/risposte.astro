@@ -1,0 +1,395 @@
+---
+/**
+ * Pagina di consultazione di uno studio: research.nexludica.org/<studio>/risposte.
+ *
+ * Accessibile agli admin e ai soci con accesso in lettura allo studio
+ * (research_study_viewers, migrazione 0066), per esempio il committente di una
+ * valutazione. Mostra solo i questionari di questo studio, senza rimandi agli altri:
+ * riepilogo per classe (parametro `context` del link) e verifica di un codice di
+ * completamento; con il livello "risposte" (e per gli admin) anche l'elenco delle
+ * risposte con dettaglio leggibile e il download CSV.
+ */
+import ResearchLayout from "../../../layouts/ResearchLayout.astro";
+import { getUser } from "../../../server/guards";
+import { getDb, getEnv } from "../../../server/db";
+import {
+  getResponseByCompletionCode,
+  getResponseById,
+  getStudyBySlug,
+  listQuestionnaires,
+  listResponses,
+  studyAccess,
+  type Questionnaire,
+  type Response as StudyResponse,
+} from "../../../server/research";
+
+export const prerender = false;
+
+Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+
+const env = await getEnv();
+const db = getDb(env as Env);
+if (!db) return new Response("Backend non disponibile", { status: 503 });
+
+const slug = Astro.params.study as string;
+const user = await getUser(Astro);
+if (!user) {
+  const here = `https://research.nexludica.org/${slug}/risposte`;
+  return Astro.redirect(`https://nexludica.org/login?next=${encodeURIComponent(here)}`);
+}
+const study = await getStudyBySlug(db, slug);
+const access = study ? await studyAccess(db, user, study.id) : null;
+if (!study || !access) {
+  return Astro.redirect("/no-access");
+}
+const showRaw = access !== "aggregati";
+
+const questionnaires = await listQuestionnaires(db, study.id);
+const qById = new Map(questionnaires.map((q) => [q.id, q]));
+const qLabel = (q: Questionnaire | undefined) =>
+  q ? q.slug.toUpperCase() + (q.description ? ` · ${q.description}` : "") : "?";
+
+const params = Astro.url.searchParams;
+const qFilter = questionnaires.find((q) => q.slug === params.get("q")) ?? null;
+const classFilter = params.get("classe") || "";
+
+const all = await listResponses(db, study.id, { limit: 5000 });
+
+type Row = {
+  r: StudyResponse;
+  q: Questionnaire | undefined;
+  payload: Record<string, unknown>;
+  classe: string;
+  minuti: number | null;
+};
+const NO_CLASS = "senza classe";
+function decode(r: StudyResponse): Row {
+  let p: Record<string, unknown> = {};
+  try { p = JSON.parse(r.payloadJson) ?? {}; } catch {}
+  const times = p._page_times as Record<string, number> | undefined;
+  const ms = times ? Object.values(times).reduce((s, v) => s + (Number(v) || 0), 0) : 0;
+  return {
+    r,
+    q: qById.get(r.questionnaireId),
+    payload: p,
+    classe: typeof p.context === "string" && p.context ? p.context : NO_CLASS,
+    minuti: ms ? Math.round(ms / 6000) / 10 : null,
+  };
+}
+const rows = all.map(decode);
+
+// Riepilogo: risposte per classe e questionario.
+const classi = Array.from(new Set(rows.map((x) => x.classe))).sort((a, b) =>
+  a === NO_CLASS ? 1 : b === NO_CLASS ? -1 : a.localeCompare(b),
+);
+const conteggio = new Map<string, number>();
+const ultima = new Map<string, number>();
+for (const x of rows) {
+  const k = `${x.classe}|${x.r.questionnaireId}`;
+  conteggio.set(k, (conteggio.get(k) ?? 0) + 1);
+  ultima.set(x.classe, Math.max(ultima.get(x.classe) ?? 0, x.r.createdAt));
+}
+const totaliQ = new Map<string, number>();
+for (const x of rows) totaliQ.set(x.r.questionnaireId, (totaliQ.get(x.r.questionnaireId) ?? 0) + 1);
+
+// Elenco filtrato.
+const elenco = rows.filter((x) =>
+  (!qFilter || x.r.questionnaireId === qFilter.id) && (!classFilter || x.classe === classFilter),
+);
+
+// Verifica di un codice di completamento.
+const codiceRaw = (params.get("codice") || "").trim();
+let codiceNorm = "";
+let codiceTrovato: Row | null = null;
+if (codiceRaw) {
+  const c = codiceRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const core = c.startsWith("NX") ? c.slice(2) : c;
+  if (core.length === 8) {
+    codiceNorm = `NX-${core.slice(0, 4)}-${core.slice(4)}`;
+    const r = await getResponseByCompletionCode(db, study.id, codiceNorm);
+    codiceTrovato = r ? decode(r) : null;
+  }
+}
+
+// Dettaglio di una risposta, con i testi delle domande e delle risposte presi dallo schema.
+type Voce = { codice: string; domanda: string; risposta: string };
+let dettaglio: { row: Row; voci: Voce[]; altri: Voce[] } | null = null;
+const rid = showRaw ? params.get("r") : null;
+if (rid) {
+  const r = await getResponseById(db, study.id, rid);
+  if (r) {
+    const row = decode(r);
+    const voci: Voce[] = [];
+    const usate = new Set<string>();
+    const strip = (s: unknown) => String(s ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const fmt = (v: unknown): string =>
+      v == null ? "" : Array.isArray(v) ? v.map(fmt).join(", ") : typeof v === "object" ? JSON.stringify(v) : String(v);
+    function walk(els: any[]) {
+      for (const e of els ?? []) {
+        if (e.type === "panel") { walk(e.elements); continue; }
+        if (!e.name || e.type === "html" || e.type === "image" || e.type === "expression") continue;
+        if (!(e.name in row.payload)) continue;
+        const v = row.payload[e.name];
+        let testo = fmt(v);
+        if (e.type === "boolean") testo = v === true ? "Sì" : v === false ? "No" : testo;
+        const ch = (e.choices ?? []).find((c: any) => (typeof c === "object" ? String(c.value) : String(c)) === String(v));
+        if (ch && typeof ch === "object" && ch.text) testo = `${strip(ch.text)} (${fmt(v)})`;
+        voci.push({ codice: e.name, domanda: strip(e.title || e.label || e.name), risposta: testo });
+        usate.add(e.name);
+      }
+    }
+    try {
+      const schema = JSON.parse(row.q?.schemaJson ?? "{}");
+      for (const p of schema.pages ?? []) walk(p.elements);
+    } catch {}
+    const altri: Voce[] = Object.keys(row.payload)
+      .filter((k) => !usate.has(k))
+      .sort()
+      .map((k) => ({ codice: k, domanda: "", risposta: fmt(row.payload[k]) }));
+    dettaglio = { row, voci, altri };
+  }
+}
+
+const data = (t: number) =>
+  new Date(t).toLocaleString("it-IT", {
+    timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+const link = (over: Record<string, string | null>) => {
+  const u = new URLSearchParams();
+  const base: Record<string, string | null> = { q: qFilter?.slug ?? null, classe: classFilter || null, ...over };
+  for (const [k, v] of Object.entries(base)) if (v) u.set(k, v);
+  const s = u.toString();
+  return s ? `?${s}` : "?";
+};
+const csvHref = `/api/research/admin/responses.csv?studyId=${study.id}` + (qFilter ? `&questionnaireId=${qFilter.id}` : "");
+const MAX_RIGHE = 1000;
+---
+
+<ResearchLayout title={`${study.title}: risposte`}>
+  <section>
+    <p class="text-sm font-bold uppercase tracking-[0.3em] text-nx-cyan">Risposte</p>
+    <h1 class="mt-2 text-3xl font-black tracking-tight text-nx-dark sm:text-4xl" style="font-family: var(--font-display);">
+      {study.title}
+    </h1>
+    <p class="mt-2 text-sm text-nx-gray-dark">
+      Accesso di <span class="font-semibold text-nx-dark">{user.name || user.email}</span>, in sola lettura.
+      {showRaw
+        ? " Le risposte sono pseudonime: nessun nome, solo il codice che ogni studente compone da sé."
+        : " Qui trovi quante risposte sono arrivate da ogni classe e la verifica dei codici di completamento; le singole risposte le vede solo il gruppo di ricerca."}
+    </p>
+  </section>
+
+  {/* Questionari */}
+  <section class="mt-8 grid gap-4 sm:grid-cols-3">
+    {questionnaires.map((q) => (
+      <div class="rounded-xl border border-nx-gray-light/20 bg-white p-5 shadow-sm">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-lg font-black text-nx-dark">{q.slug.toUpperCase()}</p>
+          <span class:list={[
+            "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider",
+            q.status === "active" ? "bg-green-100 text-green-700" : "bg-nx-gray-light/30 text-nx-gray-dark",
+          ]}>
+            {q.status === "active" ? "aperto" : q.status === "draft" ? "non attivo" : "chiuso"}
+          </span>
+        </div>
+        <p class="mt-1 text-sm text-nx-gray-dark">{q.description}</p>
+        <p class="mt-4 text-3xl font-black text-nx-blue">{totaliQ.get(q.id) ?? 0}</p>
+        <p class="text-[11px] font-bold uppercase tracking-wider text-nx-gray-dark">risposte</p>
+        {q.status === "active" && (
+          <a
+            href={`/${study.slug}/${q.slug}/?context=PROVA`}
+            target="_blank"
+            rel="noopener"
+            class="mt-4 inline-block text-xs font-semibold text-nx-blue no-underline hover:underline"
+          >
+            Apri il questionario (classe di prova)
+          </a>
+        )}
+      </div>
+    ))}
+  </section>
+  <p class="mt-3 text-xs text-nx-gray-dark">
+    Se lo apri per vederlo e arrivi fino all'invio, la risposta resta nei dati con la classe PROVA e si esclude nelle analisi.
+  </p>
+
+  {/* Verifica codice */}
+  <section class="mt-10 rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
+    <h2 class="text-lg font-bold text-nx-dark">Verifica un codice di completamento</h2>
+    <p class="mt-1 text-sm text-nx-gray-dark">Lo studente lo vede alla fine del questionario, nella forma NX-XXXX-XXXX.</p>
+    <form method="get" class="mt-4 flex flex-wrap items-center gap-3">
+      <input
+        type="text"
+        name="codice"
+        value={codiceRaw}
+        placeholder="NX-XXXX-XXXX"
+        autocomplete="off"
+        spellcheck="false"
+        class="w-56 rounded-lg border border-nx-gray-light/40 px-3 py-2 font-mono text-sm uppercase focus:border-nx-blue focus:outline-none"
+      />
+      <button type="submit" class="rounded-lg bg-nx-blue px-4 py-2 text-xs font-bold uppercase tracking-wider text-white transition hover:bg-nx-dark">
+        Verifica
+      </button>
+    </form>
+    {codiceRaw && (
+      codiceTrovato ? (
+        <p class="mt-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
+          <span class="font-bold">Codice valido.</span>
+          {" "}{qLabel(codiceTrovato.q)}, classe {codiceTrovato.classe}, inviato il {data(codiceTrovato.r.createdAt)}.
+          {showRaw && (
+            <>{" "}<a href={link({ r: codiceTrovato.r.id, codice: null })} class="font-semibold text-green-900">Vedi le risposte</a></>
+          )}
+        </p>
+      ) : (
+        <p class="mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span class="font-bold">Nessuna risposta con questo codice{codiceNorm ? ` (${codiceNorm})` : ""}.</span>
+          {codiceNorm ? " Controlla di averlo copiato bene: le lettere I, L, O e U non compaiono mai." : " Il codice ha 8 caratteri dopo NX."}
+        </p>
+      )
+    )}
+  </section>
+
+  {/* Dettaglio di una risposta */}
+  {dettaglio && (
+    <section id="dettaglio" class="mt-10 rounded-xl border-2 border-nx-blue/30 bg-white p-6 shadow-sm">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-bold text-nx-dark">Risposta {dettaglio.row.r.completionCode}</h2>
+          <p class="mt-1 text-sm text-nx-gray-dark">
+            {qLabel(dettaglio.row.q)} · classe {dettaglio.row.classe} · {data(dettaglio.row.r.createdAt)}
+            {dettaglio.row.minuti != null && ` · ${dettaglio.row.minuti} minuti`}
+            {dettaglio.row.r.anonymousCode && ` · codice ${dettaglio.row.r.anonymousCode}`}
+          </p>
+        </div>
+        <a href={link({ r: null })} class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-blue">
+          Chiudi
+        </a>
+      </div>
+      <p class="mt-3 text-xs text-nx-gray-dark">Domande nell'ordine del questionario; lo studente le ha viste in ordine casuale (campo _page_order).</p>
+      <table class="mt-4 w-full text-left text-sm">
+        <tbody class="divide-y divide-nx-gray-light/15">
+          {dettaglio.voci.map((v) => (
+            <tr class="align-top">
+              <td class="w-28 py-2 pr-3 font-mono text-[11px] text-nx-gray-dark">{v.codice}</td>
+              <td class="py-2 pr-4 text-nx-dark">{v.domanda}</td>
+              <td class="py-2 font-semibold text-nx-blue">{v.risposta}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {dettaglio.altri.length > 0 && (
+        <details class="mt-6">
+          <summary class="cursor-pointer text-xs font-bold uppercase tracking-wider text-nx-gray-dark">
+            Campi tecnici ({dettaglio.altri.length})
+          </summary>
+          <table class="mt-3 w-full text-left text-xs">
+            <tbody class="divide-y divide-nx-gray-light/15">
+              {dettaglio.altri.map((v) => (
+                <tr class="align-top">
+                  <td class="w-40 py-1.5 pr-3 font-mono text-nx-gray-dark">{v.codice}</td>
+                  <td class="break-all py-1.5 font-mono text-nx-dark">{v.risposta}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </section>
+  )}
+
+  {/* Riepilogo per classe */}
+  <section class="mt-10">
+    <h2 class="text-lg font-bold text-nx-dark">Risposte per classe</h2>
+    {rows.length === 0 ? (
+      <p class="mt-4 rounded-lg border-2 border-dashed border-nx-gray-light/40 bg-white p-8 text-center text-sm text-nx-gray-dark">
+        Ancora nessuna risposta.
+      </p>
+    ) : (
+      <div class="mt-4 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white shadow-sm">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-nx-gray-light/20 bg-nx-off-white text-xs uppercase tracking-wider text-nx-dark">
+            <tr>
+              <th class="px-4 py-3">Classe</th>
+              {questionnaires.map((q) => <th class="px-4 py-3 text-right">{q.slug.toUpperCase()}</th>)}
+              <th class="px-4 py-3">Ultima risposta</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-nx-gray-light/10">
+            {classi.map((c) => (
+              <tr>
+                <td class="px-4 py-2.5 font-semibold">
+                  {showRaw
+                    ? <a href={link({ classe: c, r: null, codice: null }) + "#elenco"} class="text-nx-dark no-underline hover:text-nx-blue">{c}</a>
+                    : c}
+                </td>
+                {questionnaires.map((q) => (
+                  <td class="px-4 py-2.5 text-right tabular-nums">{conteggio.get(`${c}|${q.id}`) ?? 0}</td>
+                ))}
+                <td class="px-4 py-2.5 text-nx-gray-dark">{data(ultima.get(c) ?? 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+
+  {/* Elenco */}
+  {showRaw && rows.length > 0 && (
+    <section id="elenco" class="mt-10">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <h2 class="text-lg font-bold text-nx-dark">Elenco delle risposte</h2>
+        <a
+          href={csvHref}
+          class="rounded-lg bg-nx-dark px-4 py-2 text-xs font-bold uppercase tracking-wider text-white no-underline shadow-sm transition hover:bg-nx-blue"
+        >
+          Scarica CSV{qFilter ? ` ${qFilter.slug.toUpperCase()}` : ""}
+        </a>
+      </div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <a href={link({ q: null, r: null, codice: null }) + "#elenco"} class:list={["rounded-full px-3 py-1 text-xs font-bold no-underline", !qFilter ? "bg-nx-blue text-white" : "border border-nx-gray-light/40 bg-white text-nx-gray-dark hover:text-nx-blue"]}>Tutti</a>
+        {questionnaires.map((q) => (
+          <a href={link({ q: q.slug, r: null, codice: null }) + "#elenco"} class:list={["rounded-full px-3 py-1 text-xs font-bold no-underline", qFilter?.id === q.id ? "bg-nx-blue text-white" : "border border-nx-gray-light/40 bg-white text-nx-gray-dark hover:text-nx-blue"]}>{q.slug.toUpperCase()}</a>
+        ))}
+        {classFilter && (
+          <a href={link({ classe: null, r: null, codice: null }) + "#elenco"} class="ml-2 rounded-full border border-nx-blue/40 bg-white px-3 py-1 text-xs font-bold text-nx-blue no-underline">
+            Classe {classFilter} (togli il filtro)
+          </a>
+        )}
+        <span class="ml-auto text-xs text-nx-gray-dark">{elenco.length} risposte</span>
+      </div>
+      <div class="mt-4 overflow-x-auto rounded-xl border border-nx-gray-light/20 bg-white shadow-sm">
+        <table class="w-full text-left text-xs">
+          <thead class="border-b border-nx-gray-light/20 bg-nx-off-white uppercase tracking-wider text-nx-dark">
+            <tr>
+              <th class="px-3 py-3">Inviata</th>
+              <th class="px-3 py-3">Questionario</th>
+              <th class="px-3 py-3">Classe</th>
+              <th class="px-3 py-3">Codice studente</th>
+              <th class="px-3 py-3">Codice di completamento</th>
+              <th class="px-3 py-3 text-right">Minuti</th>
+              <th class="px-3 py-3"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-nx-gray-light/10">
+            {elenco.slice(0, MAX_RIGHE).map((x) => (
+              <tr class:list={["hover:bg-nx-cyan/5", dettaglio?.row.r.id === x.r.id && "bg-nx-cyan/10"]}>
+                <td class="whitespace-nowrap px-3 py-2.5 text-nx-gray-dark">{data(x.r.createdAt)}</td>
+                <td class="whitespace-nowrap px-3 py-2.5 font-semibold text-nx-dark">{x.q?.slug.toUpperCase() ?? "?"}</td>
+                <td class="px-3 py-2.5">{x.classe}</td>
+                <td class="px-3 py-2.5 font-mono">{x.r.anonymousCode ?? ""}</td>
+                <td class="px-3 py-2.5 font-mono text-nx-blue">{x.r.completionCode}</td>
+                <td class="px-3 py-2.5 text-right tabular-nums">{x.minuti ?? ""}</td>
+                <td class="px-3 py-2.5 text-right">
+                  <a href={link({ r: x.r.id, codice: null }) + "#dettaglio"} class="font-semibold text-nx-blue no-underline hover:underline">Vedi</a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {elenco.length > MAX_RIGHE && (
+        <p class="mt-2 text-xs text-nx-gray-dark">Sono mostrate le {MAX_RIGHE} più recenti: le altre sono nel CSV.</p>
+      )}
+    </section>
+  )}
+</ResearchLayout>

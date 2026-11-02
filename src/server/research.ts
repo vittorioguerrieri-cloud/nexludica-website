@@ -358,6 +358,10 @@ export async function submitResponse(
   const completionCode = generateCompletionCode();
   const id = uuid();
   const t = now();
+  // Schema con nx_no_client_meta: niente user agent né hash dell'IP (studi con
+  // minorenni: minimizzazione dei dati, art. 5.1.c GDPR).
+  let noClientMeta = false;
+  try { noClientMeta = JSON.parse(q.schemaJson)?.nx_no_client_meta === true; } catch {}
   await db
     .prepare(
       `INSERT INTO research_responses
@@ -370,8 +374,8 @@ export async function submitResponse(
       id, q.id, study.id, q.version,
       anonymousCode, completionCode,
       JSON.stringify(input.payload),
-      input.userAgent ?? null,
-      input.ipHash ?? null,
+      noClientMeta ? null : input.userAgent ?? null,
+      noClientMeta ? null : input.ipHash ?? null,
       t,
     )
     .run();
@@ -391,7 +395,11 @@ export async function listResponses(
     .prepare(`SELECT * FROM research_responses WHERE ${conds.join(" AND ")} ORDER BY created_at DESC LIMIT ?`)
     .bind(...vals, limit)
     .all<Record<string, unknown>>();
-  return rs.results.map((r) => ({
+  return rs.results.map(rowToResponse);
+}
+
+function rowToResponse(r: Record<string, unknown>): Response {
+  return {
     id: String(r.id),
     questionnaireId: String(r.questionnaire_id),
     studyId: String(r.study_id),
@@ -402,7 +410,7 @@ export async function listResponses(
     userAgent: (r.user_agent as string) ?? null,
     ipHash: (r.ip_hash as string) ?? null,
     createdAt: Number(r.created_at),
-  }));
+  };
 }
 
 export async function countResponses(
@@ -417,6 +425,65 @@ export async function countResponses(
     .bind(studyId)
     .all<{ questionnaire_id: string; c: number }>();
   return rs.results.map((r) => ({ questionnaireId: r.questionnaire_id, count: r.c }));
+}
+
+export async function getResponseById(
+  db: D1Database,
+  studyId: string,
+  id: string,
+): Promise<Response | null> {
+  const r = await db
+    .prepare("SELECT * FROM research_responses WHERE study_id = ? AND id = ?")
+    .bind(studyId, id)
+    .first<Record<string, unknown>>();
+  return r ? rowToResponse(r) : null;
+}
+
+export async function getResponseByCompletionCode(
+  db: D1Database,
+  studyId: string,
+  code: string,
+): Promise<Response | null> {
+  const r = await db
+    .prepare("SELECT * FROM research_responses WHERE study_id = ? AND completion_code = ?")
+    .bind(studyId, code)
+    .first<Record<string, unknown>>();
+  return r ? rowToResponse(r) : null;
+}
+
+// ----- ACCESSO IN LETTURA (committenti) -----
+// Gli admin vedono tutti gli studi; gli altri soci solo quelli elencati in
+// research_study_viewers (migrazione 0066), a uno di due livelli:
+// - "aggregati": conteggi per classe e verifica dei codici di completamento;
+// - "risposte": anche le singole risposte e il CSV.
+
+export type StudyAccess = "admin" | "risposte" | "aggregati";
+
+export async function studyAccess(
+  db: D1Database,
+  user: { id: string; role: string } | null,
+  studyId: string,
+): Promise<StudyAccess | null> {
+  if (!user) return null;
+  if (user.role === "admin") return "admin";
+  const r = await db
+    .prepare("SELECT access_level FROM research_study_viewers WHERE study_id = ? AND user_id = ?")
+    .bind(studyId, user.id)
+    .first<{ access_level: string }>();
+  if (!r) return null;
+  return r.access_level === "risposte" ? "risposte" : "aggregati";
+}
+
+export async function listViewerStudies(db: D1Database, userId: string): Promise<Study[]> {
+  const rs = await db
+    .prepare(
+      `SELECT s.* FROM research_studies s
+       JOIN research_study_viewers v ON v.study_id = s.id
+       WHERE v.user_id = ? ORDER BY s.updated_at DESC`,
+    )
+    .bind(userId)
+    .all<Record<string, unknown>>();
+  return rs.results.map(rowToStudy);
 }
 
 /**

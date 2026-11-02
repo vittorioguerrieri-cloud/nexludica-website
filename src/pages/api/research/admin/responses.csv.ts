@@ -1,6 +1,6 @@
 /**
  * Export CSV delle risposte di uno studio (o di un questionario specifico).
- * Solo admin. Query string:
+ * Admin, o soci con accesso "risposte" allo studio (research_study_viewers). Query string:
  *   ?studyId=...
  *   &questionnaireId=...    (opzionale)
  *
@@ -10,7 +10,7 @@
 import type { APIRoute } from "astro";
 import { getDb, getEnv } from "../../../../server/db";
 import { loadUserFromContext } from "../../../../server/auth";
-import { getQuestionnaireById, getStudyById, listResponses } from "../../../../server/research";
+import { studyAccess, getQuestionnaireById, getStudyById, listResponses } from "../../../../server/research";
 
 export const prerender = false;
 
@@ -19,15 +19,18 @@ export const GET: APIRoute = async (ctx) => {
   const db = getDb(env);
   if (!db) return new Response("backend", { status: 503 });
   const u = await loadUserFromContext(ctx);
-  if (!u || u.role !== "admin") return new Response("forbidden", { status: 403 });
+  if (!u) return new Response("forbidden", { status: 403 });
 
   const studyId = ctx.url.searchParams.get("studyId");
   const questionnaireId = ctx.url.searchParams.get("questionnaireId");
   if (!studyId) return new Response("studyId richiesto", { status: 400 });
+  const access = await studyAccess(db, u, studyId);
+  if (access !== "admin" && access !== "risposte") return new Response("forbidden", { status: 403 });
 
   const study = await getStudyById(db, studyId);
   if (!study) return new Response("studio non trovato", { status: 404 });
   const q = questionnaireId ? await getQuestionnaireById(db, questionnaireId) : null;
+  if (q && q.studyId !== studyId) return new Response("questionario non trovato", { status: 404 });
 
   const responses = await listResponses(db, studyId, { questionnaireId: questionnaireId ?? undefined, limit: 5000 });
 

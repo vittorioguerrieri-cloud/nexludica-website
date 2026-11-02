@@ -75,7 +75,7 @@ const UI_TEXTS = {
     thanks: "Thank you!",
     recorded: "Your responses have been recorded successfully.",
     codeLabel: "Completion code",
-    codeHint: "Keep this code as your receipt.",
+    codeHint: "Take a screenshot of this page and keep it: the code is the receipt of your participation.",
     missingInline: "You have not provided an answer to this question.",
     mustConfirm: "You must confirm to proceed.",
     submitError: "Submission error: ",
@@ -109,7 +109,7 @@ const UI_TEXTS = {
     thanks: "Grazie!",
     recorded: "Le tue risposte sono state registrate.",
     codeLabel: "Codice di completamento",
-    codeHint: "Conserva questo codice: è la ricevuta della tua partecipazione.",
+    codeHint: "Fai uno screenshot di questa pagina e conservalo: il codice è la ricevuta della tua partecipazione.",
     missingInline: "Non hai risposto a questa domanda.",
     mustConfirm: "Per andare avanti devi confermare.",
     submitError: "Errore di invio: ",
@@ -268,7 +268,7 @@ const UI = UI_TEXTS[lang];
     <div id="completion-code-box">
       <p class="mt-6 text-xs uppercase tracking-wider text-nx-gray-dark">{UI.codeLabel}</p>
       <p id="completion-code" class="mt-2 font-mono text-2xl font-bold text-nx-dark"></p>
-      <p class="mt-2 text-xs text-nx-gray-dark">{UI.codeHint}</p>
+      <p class="mx-auto mt-3 max-w-md text-base font-bold text-nx-blue">{UI.codeHint}</p>
     </div>
 
     <!-- Prolific completion button (mostrato solo se utente è arrivato via Prolific) -->
@@ -612,6 +612,25 @@ const UI = UI_TEXTS[lang];
     .nx-cards.nx-cards--vertical .sd-item .sd-selectbase__label {
       justify-content: flex-start;
       text-align: left;
+    }
+    /* Pannello con nome "nxcard_...": una domanda composta obbligatoria (per esempio un
+       campo e la casella "Non la conosco") mostrata come una sola card, senza la riga
+       sotto il titolo e con l'asterisco delle domande obbligatorie. */
+    [data-key^="nxcard_"] > .sd-panel .sd-panel__title > span:last-child::after {
+      content: "\00a0*";
+      color: var(--sjs-special-red, var(--red, #e60a3e));
+    }
+    [data-key^="nxcard_"] > .sd-panel.sd-element--complex > .sd-panel__header.sd-element__header {
+      padding-bottom: 0;
+    }
+    [data-key^="nxcard_"] > .sd-panel > .sd-panel__header::after {
+      display: none;
+    }
+    [data-key^="nxcard_"] > .sd-panel > .sd-panel__content {
+      padding-top: 16px;
+    }
+    [data-key^="nxcard_"] > .sd-panel > .sd-panel__content > .sd-row ~ .sd-row {
+      margin-top: 12px;
     }
   </style>
 
@@ -1237,6 +1256,9 @@ const UI = UI_TEXTS[lang];
           // file, signaturepad — non hanno "risposta" da raccogliere.
           const STATIC_TYPES = ["html", "image", "panel", "expression", "signaturepad"];
           if (STATIC_TYPES.indexOf(t) !== -1) return 0;
+          // Una casella non spuntata (boolean come checkbox, es. "Non la conosco") è già
+          // una risposta: "no".
+          if (t === "boolean" && q.renderAs === "checkbox") return 0;
 
           if ((t === "matrix" || t === "matrixdropdown") && Array.isArray(q.rows) && q.rows.length > 0) {
             const data = q.value || {};
@@ -1433,6 +1455,8 @@ const UI = UI_TEXTS[lang];
         // nx_speed_prompt: true → al primo passaggio di pagina più rapido di
         //   nx_speed_ms_per_word per parola (default 350 ms, Conrad et al. 2017) compare un
         //   solo messaggio cortese; la pagina in cui è comparso va in `_speed_prompt_page`.
+        //   Si contano solo i testi letti per la prima volta: le stesse ancore di risposta o la
+        //   stessa consegna ripetute in pagine successive non si rileggono.
         //   Gira dopo il probing: se il probing ha già bloccato la pagina, non interviene.
         const wantsParadata = !!(schema && schema.nx_paradata === true);
         const wantsSpeedPrompt = !!(schema && schema.nx_speed_prompt === true);
@@ -1463,7 +1487,8 @@ const UI = UI_TEXTS[lang];
         function onPageShown(page) {
           if (!page) return;
           const inputs = (page.questions || []).filter(function (q) {
-            return q.isVisible && q.getType && STATIC_TYPES_SPEED.indexOf(q.getType()) === -1;
+            return q.isVisible && q.getType && STATIC_TYPES_SPEED.indexOf(q.getType()) === -1 &&
+              !(q.getType() === "boolean" && q.renderAs === "checkbox");
           });
           const allAnswered = inputs.length > 0 && inputs.every(function (q) { return !q.isEmpty(); });
           pageIsRevisit = visitedPages.has(page.name) || allAnswered;
@@ -1473,27 +1498,39 @@ const UI = UI_TEXTS[lang];
         survey.onCurrentPageChanged.add(function (sender, options) {
           addPageTime(options.oldCurrentPage);
           pageStartedAt = Date.now();
+          rememberTexts(options.oldCurrentPage);
           onPageShown(options.newCurrentPage);
         });
         survey.onCompleting.add(function (sender) {
           addPageTime(sender.currentPage);
         });
 
-        function wordsOnPage(page) {
-          let n = 0;
-          function count(s) {
-            if (!s) return;
-            n += String(s).replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length;
-          }
+        // Unità di testo di una pagina: html, titolo, descrizione, etichetta e l'insieme delle
+        // risposte (contato come un blocco). Di un menu a tendina si legge solo la domanda.
+        function textUnits(page) {
+          const units = [];
           (page.questions || []).forEach(function (q) {
             if (!q.isVisible) return;
             const type = q.getType ? q.getType() : "";
-            if (type === "html") { count(q.html); return; }
-            count(q.title);
-            count(q.description);
-            if (type === "boolean") count(q.label);
-            (q.visibleChoices || []).forEach(function (c) { count(c.text); });
-            (q.visibleRows || []).forEach(function (r) { count(r.text); });
+            if (type === "html") { units.push(q.html); return; }
+            units.push(q.title, q.description);
+            if (type === "boolean") units.push(q.label);
+            if (type !== "dropdown") {
+              units.push((q.visibleChoices || []).map(function (c) { return c.text; }).join(" "));
+            }
+            units.push((q.visibleRows || []).map(function (r) { return r.text; }).join(" "));
+          });
+          return units.map(function (s) { return String(s || "").replace(/<[^>]*>/g, " ").trim(); })
+            .filter(Boolean);
+        }
+        const seenTexts = new Set();
+        function rememberTexts(page) {
+          if (page) textUnits(page).forEach(function (u) { seenTexts.add(u); });
+        }
+        function wordsOnPage(page) {
+          let n = 0;
+          textUnits(page).forEach(function (u) {
+            if (!seenTexts.has(u)) n += u.split(/\s+/).filter(Boolean).length;
           });
           return n;
         }

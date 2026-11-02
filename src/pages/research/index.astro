@@ -1,7 +1,7 @@
 ---
 import ResearchLayout from "../../layouts/ResearchLayout.astro";
 import { getDb, getEnv } from "../../server/db";
-import { listStudies, listQuestionnaires, countResponses, type Study } from "../../server/research";
+import { listStudies, listQuestionnaires, countResponses, listViewerStudies, type Study } from "../../server/research";
 import { getUser } from "../../server/guards";
 
 export const prerender = false;
@@ -9,12 +9,20 @@ export const prerender = false;
 Astro.response.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
 
 const user = await getUser(Astro);
-if (!user || user.role !== "admin") {
+if (!user) {
   return Astro.redirect("/no-access");
 }
 
 const env = await getEnv();
 const db = getDb(env as Env)!;
+
+// Soci con accesso in lettura (committenti): vanno alla pagina delle risposte del loro
+// studio, senza vedere gli altri.
+if (user.role !== "admin") {
+  const own = await listViewerStudies(db, user.id);
+  if (own.length === 0) return Astro.redirect("/no-access");
+  return Astro.redirect(`/${own[0].slug}/risposte`);
+}
 
 const studies = await listStudies(db);
 
