@@ -298,12 +298,56 @@ export interface SubmitResponseInput {
   payload: Record<string, unknown>;
   userAgent?: string;
   ipHash?: string;
+  /** Chiave segreta per l'impronta HMAC del codice (secret RESEARCH_CODE_KEY). */
+  codeKey?: string;
 }
 
 export interface SubmitResponseResult {
   id: string;
   completionCode: string;
   anonymousCode: string | null;
+  /** true se il codice di completamento è salvato a parte, senza legami con la risposta. */
+  unlinked: boolean;
+}
+
+/**
+ * Opzioni di anonimato lette dallo schema del questionario:
+ * - nx_no_client_meta: niente user agent né hash dell'IP;
+ * - nx_code_hmac: il codice di abbinamento si salva solo come impronta HMAC-SHA256 con
+ *   la chiave segreta del server (16 caratteri esadecimali), più in `_code_parziali` le
+ *   impronte con un elemento alla volta mascherato (abbinamento con un errore); i campi
+ *   identitari dello studio non si salvano;
+ * - nx_drop_fields: altri campi del payload da non salvare;
+ * - nx_unlinked_completion_code: il codice di completamento va in research_completion_codes
+ *   (solo codice, studio, questionario e classe), la risposta ha completion_code vuoto;
+ * - nx_coarse_timestamp: created_at troncato al giorno (UTC).
+ */
+interface PrivacyOptions {
+  noClientMeta: boolean;
+  codeHmac: boolean;
+  dropFields: string[];
+  unlinkedCompletion: boolean;
+  coarseTimestamp: boolean;
+}
+
+function privacyOptions(schemaJson: string): PrivacyOptions {
+  let sch: Record<string, unknown> = {};
+  try { sch = JSON.parse(schemaJson) ?? {}; } catch {}
+  return {
+    noClientMeta: sch.nx_no_client_meta === true,
+    codeHmac: sch.nx_code_hmac === true,
+    dropFields: Array.isArray(sch.nx_drop_fields) ? sch.nx_drop_fields.map(String) : [],
+    unlinkedCompletion: sch.nx_unlinked_completion_code === true,
+    coarseTimestamp: sch.nx_coarse_timestamp === true,
+  };
+}
+
+async function hmacHex(key: string, message: string): Promise<string> {
+  const k = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(message));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -350,19 +394,31 @@ export async function submitResponse(
   if (!study) return { error: "Studio non trovato" };
   if (study.status !== "active") return { error: "Studio non attivo" };
 
-  const anonymousCode = buildAnonymousCode(
-    study.anonymousCodeTemplate,
-    study.identityFields,
-    input.payload,
-  );
+  const opts = privacyOptions(q.schemaJson);
+  const payload: Record<string, unknown> = { ...input.payload };
+
+  let anonymousCode: string | null;
+  if (opts.codeHmac) {
+    const key = input.codeKey;
+    if (!key) return { error: "Configurazione incompleta: manca la chiave del codice" };
+    const parts = study.identityFields.map((f) => String(payload[f] ?? "").trim().toUpperCase());
+    const msg = (xs: string[]) => study.id + "|" + xs.join("|");
+    anonymousCode = (await hmacHex(key, msg(parts))).slice(0, 16);
+    payload._code_parziali = await Promise.all(
+      parts.map(async (_, i) =>
+        (await hmacHex(key, msg(parts.map((x, j) => (j === i ? "*" : x))))).slice(0, 12),
+      ),
+    );
+    for (const f of study.identityFields) delete payload[f];
+  } else {
+    anonymousCode = buildAnonymousCode(study.anonymousCodeTemplate, study.identityFields, payload);
+  }
+  for (const f of opts.dropFields) delete payload[f];
+
   const completionCode = generateCompletionCode();
   const id = uuid();
-  const t = now();
-  // Schema con nx_no_client_meta: niente user agent né hash dell'IP (studi con
-  // minorenni: minimizzazione dei dati, art. 5.1.c GDPR).
-  let noClientMeta = false;
-  try { noClientMeta = JSON.parse(q.schemaJson)?.nx_no_client_meta === true; } catch {}
-  await db
+  const t = opts.coarseTimestamp ? Math.floor(now() / 86_400_000) * 86_400_000 : now();
+  const insertResponse = db
     .prepare(
       `INSERT INTO research_responses
         (id, questionnaire_id, study_id, schema_version,
@@ -372,14 +428,24 @@ export async function submitResponse(
     )
     .bind(
       id, q.id, study.id, q.version,
-      anonymousCode, completionCode,
-      JSON.stringify(input.payload),
-      noClientMeta ? null : input.userAgent ?? null,
-      noClientMeta ? null : input.ipHash ?? null,
+      anonymousCode, opts.unlinkedCompletion ? "" : completionCode,
+      JSON.stringify(payload),
+      opts.noClientMeta ? null : input.userAgent ?? null,
+      opts.noClientMeta ? null : input.ipHash ?? null,
       t,
-    )
-    .run();
-  return { id, completionCode, anonymousCode };
+    );
+  if (opts.unlinkedCompletion) {
+    const context = typeof payload.context === "string" ? payload.context.slice(0, 64) : null;
+    await db.batch([
+      insertResponse,
+      db.prepare(
+        "INSERT INTO research_completion_codes (code, study_id, questionnaire_id, context) VALUES (?, ?, ?, ?)",
+      ).bind(completionCode, study.id, q.id, context),
+    ]);
+  } else {
+    await insertResponse.run();
+  }
+  return { id, completionCode, anonymousCode, unlinked: opts.unlinkedCompletion };
 }
 
 export async function listResponses(
@@ -392,7 +458,9 @@ export async function listResponses(
   if (opts.questionnaireId) { conds.push("questionnaire_id = ?"); vals.push(opts.questionnaireId); }
   const limit = Math.min(opts.limit ?? 1000, 5000);
   const rs = await db
-    .prepare(`SELECT * FROM research_responses WHERE ${conds.join(" AND ")} ORDER BY created_at DESC LIMIT ?`)
+    // id come secondo criterio: a parità di data (nx_coarse_timestamp) l'ordine è casuale,
+    // non quello di arrivo.
+    .prepare(`SELECT * FROM research_responses WHERE ${conds.join(" AND ")} ORDER BY created_at DESC, id LIMIT ?`)
     .bind(...vals, limit)
     .all<Record<string, unknown>>();
   return rs.results.map(rowToResponse);
@@ -449,6 +517,19 @@ export async function getResponseByCompletionCode(
     .bind(studyId, code)
     .first<Record<string, unknown>>();
   return r ? rowToResponse(r) : null;
+}
+
+/** Codice di completamento salvato a parte (nx_unlinked_completion_code). */
+export async function getUnlinkedCompletionCode(
+  db: D1Database,
+  studyId: string,
+  code: string,
+): Promise<{ questionnaireId: string; context: string | null } | null> {
+  const r = await db
+    .prepare("SELECT questionnaire_id, context FROM research_completion_codes WHERE study_id = ? AND code = ?")
+    .bind(studyId, code)
+    .first<{ questionnaire_id: string; context: string | null }>();
+  return r ? { questionnaireId: r.questionnaire_id, context: r.context } : null;
 }
 
 // ----- ACCESSO IN LETTURA (committenti) -----

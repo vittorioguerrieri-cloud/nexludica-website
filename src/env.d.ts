@@ -25,6 +25,9 @@ interface Env {
   FROM_NAME: string;
   /** Set via `wrangler secret put RESEND_API_KEY`. Optional in dev. */
   RESEND_API_KEY?: string;
+  /** Chiave dell'impronta HMAC dei codici di abbinamento (nx_code_hmac). Set via
+   *  `wrangler secret put RESEARCH_CODE_KEY`; nessuno la legge, si cancella a fine raccolta. */
+  RESEARCH_CODE_KEY?: string;
   /** Signing secret del webhook Resend (whsec_...). Set via `wrangler secret put RESEND_WEBHOOK_SECRET`. */
   RESEND_WEBHOOK_SECRET?: string;
   /** Set via `wrangler secret put SESSION_SECRET`. Required in prod. */

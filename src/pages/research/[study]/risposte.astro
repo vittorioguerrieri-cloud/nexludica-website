@@ -7,13 +7,15 @@
  * valutazione. Mostra solo i questionari di questo studio, senza rimandi agli altri:
  * riepilogo per classe (parametro `context` del link) e verifica di un codice di
  * completamento; con il livello "risposte" (e per gli admin) anche l'elenco delle
- * risposte con dettaglio leggibile e il download CSV.
+ * risposte con dettaglio leggibile e il download CSV. Le date sono mostrate senza ora;
+ * i codici salvati a parte (nx_unlinked_completion_code) non portano a nessuna risposta.
  */
 import ResearchLayout from "../../../layouts/ResearchLayout.astro";
 import { getUser } from "../../../server/guards";
 import { getDb, getEnv } from "../../../server/db";
 import {
   getResponseByCompletionCode,
+  getUnlinkedCompletionCode,
   getResponseById,
   getStudyBySlug,
   listQuestionnaires,
@@ -101,13 +103,19 @@ const elenco = rows.filter((x) =>
 const codiceRaw = (params.get("codice") || "").trim();
 let codiceNorm = "";
 let codiceTrovato: Row | null = null;
+let codiceSeparato: { q: Questionnaire | undefined; classe: string } | null = null;
 if (codiceRaw) {
   const c = codiceRaw.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const core = c.startsWith("NX") ? c.slice(2) : c;
   if (core.length === 8) {
     codiceNorm = `NX-${core.slice(0, 4)}-${core.slice(4)}`;
-    const r = await getResponseByCompletionCode(db, study.id, codiceNorm);
-    codiceTrovato = r ? decode(r) : null;
+    const u = await getUnlinkedCompletionCode(db, study.id, codiceNorm);
+    if (u) {
+      codiceSeparato = { q: qById.get(u.questionnaireId), classe: u.context || NO_CLASS };
+    } else {
+      const r = await getResponseByCompletionCode(db, study.id, codiceNorm);
+      codiceTrovato = r ? decode(r) : null;
+    }
   }
 }
 
@@ -152,7 +160,7 @@ if (rid) {
 
 const data = (t: number) =>
   new Date(t).toLocaleString("it-IT", {
-    timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    timeZone: "Europe/Rome", day: "2-digit", month: "2-digit", year: "numeric",
   });
 const link = (over: Record<string, string | null>) => {
   const u = new URLSearchParams();
@@ -163,6 +171,25 @@ const link = (over: Record<string, string | null>) => {
 };
 const csvHref = `/api/research/admin/responses.csv?studyId=${study.id}` + (qFilter ? `&questionnaireId=${qFilter.id}` : "");
 const MAX_RIGHE = 1000;
+
+// Link e QR per classe: le classi vengono da nx_contexts nello schema dei questionari attivi.
+const attivi = questionnaires.filter((q) => q.status === "active");
+const classiLink = Array.from(new Set(attivi.flatMap((q) => {
+  try {
+    const c = JSON.parse(q.schemaJson)?.nx_contexts;
+    return Array.isArray(c) ? c.map(String) : [];
+  } catch { return []; }
+}))).sort();
+const qrData = {
+  studio: study.title,
+  classi: classiLink,
+  questionari: attivi.map((q) => ({
+    slug: q.slug.toUpperCase(),
+    titolo: q.description ? q.description.split("·")[0].trim() : "",
+    url: `https://research.nexludica.org/${study.slug}/${q.slug}/?context=`,
+    conteggi: Object.fromEntries(classiLink.map((c) => [c, conteggio.get(`${c}|${q.id}`) ?? 0])),
+  })),
+};
 ---
 
 <ResearchLayout title={`${study.title}: risposte`}>
@@ -212,6 +239,146 @@ const MAX_RIGHE = 1000;
     Se lo apri per vederlo e arrivi fino all'invio, la risposta resta nei dati con la classe PROVA e si esclude nelle analisi.
   </p>
 
+  {/* Link e QR per le classi */}
+  {classiLink.length > 0 && qrData.questionari.length > 0 && (
+    <section id="qr-classi" class="mt-10 rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm" data-qr={JSON.stringify(qrData)}>
+      <h2 class="text-lg font-bold text-nx-dark">QR per le classi</h2>
+      <p class="mt-1 text-sm text-nx-gray-dark">
+        Ogni classe ha il suo link: il codice della classe finisce nelle risposte. Scegli il questionario,
+        poi la classe: il QR si apre a schermo intero, pronto da proiettare. Con le frecce passi da una classe all'altra.
+      </p>
+      <div class="mt-4 flex flex-wrap gap-2" role="group" aria-label="Questionario">
+        {qrData.questionari.map((q, i) => (
+          <button type="button" data-qr-q={i} aria-pressed={i === 0 ? "true" : "false"}
+            class="qr-q rounded-full border border-nx-gray-light/40 bg-white px-4 py-1.5 text-sm font-bold text-nx-gray-dark">
+            {q.slug}{q.titolo && <span class="font-normal"> · {q.titolo}</span>}
+          </button>
+        ))}
+      </div>
+      <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {classiLink.map((c) => (
+          <button type="button" data-qr-classe={c}
+            class="rounded-lg border border-nx-gray-light/30 bg-nx-off-white px-3 py-3 text-left transition hover:border-nx-blue">
+            <span class="block text-base font-black text-nx-dark">{c}</span>
+            <span class="qr-count block text-xs text-nx-gray-dark" data-classe={c}></span>
+          </button>
+        ))}
+      </div>
+    </section>
+  )}
+
+  <div id="qr-overlay" class="fixed inset-0 z-50 hidden flex-col items-center justify-center gap-4 bg-white p-6" role="dialog" aria-modal="true" aria-labelledby="qr-titolo">
+    <p id="qr-sopra" class="text-lg font-bold uppercase tracking-[0.2em] text-nx-cyan"></p>
+    <p id="qr-titolo" class="text-5xl font-black text-nx-dark" style="font-family: var(--font-display);"></p>
+    <div id="qr-svg" class="aspect-square w-[min(68vh,88vw)]"></div>
+    <p id="qr-url" class="break-all text-center font-mono text-lg text-nx-dark"></p>
+    <div class="flex flex-wrap items-center justify-center gap-3">
+      <button type="button" id="qr-prev" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-sm font-bold text-nx-dark hover:border-nx-blue">Classe precedente</button>
+      <button type="button" id="qr-next" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-sm font-bold text-nx-dark hover:border-nx-blue">Classe successiva</button>
+      <button type="button" id="qr-copia" class="rounded-lg border border-nx-gray-light/40 px-4 py-2 text-sm font-bold text-nx-dark hover:border-nx-blue">Copia il link</button>
+      <button type="button" id="qr-chiudi" class="rounded-lg bg-nx-dark px-4 py-2 text-sm font-bold text-white hover:bg-nx-blue">Chiudi (Esc)</button>
+    </div>
+  </div>
+
+  <script>
+    import qrcode from "qrcode-generator";
+
+    type Q = { slug: string; titolo: string; url: string; conteggi: Record<string, number> };
+    const sezione = document.getElementById("qr-classi");
+    const overlay = document.getElementById("qr-overlay")!;
+    if (sezione) {
+      const dati = JSON.parse(sezione.dataset.qr || "{}") as { studio: string; classi: string[]; questionari: Q[] };
+      let qi = 0;
+      let ci = -1;
+      const el = (id: string) => document.getElementById(id)!;
+
+      // QR come SVG nitido a ogni dimensione: nero su bianco, il più leggibile al proiettore.
+      function qrSvg(testo: string): string {
+        const qr = qrcode(0, "M");
+        qr.addData(testo);
+        qr.make();
+        const n = qr.getModuleCount();
+        const m = 4;
+        let d = "";
+        for (let r = 0; r < n; r++) {
+          for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + m},${r + m}h1v1h-1z`;
+        }
+        const lato = n + 2 * m;
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lato} ${lato}" shape-rendering="crispEdges" width="100%" height="100%" role="img" aria-label="Codice QR"><rect width="${lato}" height="${lato}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+      }
+
+      function aggiornaConteggi() {
+        const q = dati.questionari[qi];
+        document.querySelectorAll<HTMLButtonElement>(".qr-q").forEach((b) => {
+          const on = Number(b.dataset.qrQ) === qi;
+          b.setAttribute("aria-pressed", on ? "true" : "false");
+          b.classList.toggle("bg-nx-blue", on);
+          b.classList.toggle("text-white", on);
+          b.classList.toggle("border-nx-blue", on);
+          b.classList.toggle("bg-white", !on);
+          b.classList.toggle("text-nx-gray-dark", !on);
+        });
+        document.querySelectorAll<HTMLElement>(".qr-count").forEach((s) => {
+          const n = q.conteggi[s.dataset.classe || ""] ?? 0;
+          s.textContent = `${n} ${n === 1 ? "risposta" : "risposte"} a ${q.slug}`;
+        });
+      }
+
+      function mostra() {
+        const q = dati.questionari[qi];
+        const classe = dati.classi[ci];
+        const url = q.url + encodeURIComponent(classe);
+        el("qr-sopra").textContent = `${dati.studio} · ${q.slug}${q.titolo ? " · " + q.titolo : ""}`;
+        el("qr-titolo").textContent = `Classe ${classe}`;
+        el("qr-svg").innerHTML = qrSvg(url);
+        el("qr-url").textContent = url.replace(/^https:\/\//, "");
+        el("qr-copia").textContent = "Copia il link";
+      }
+
+      function apri(classe: string) {
+        ci = dati.classi.indexOf(classe);
+        mostra();
+        overlay.classList.remove("hidden");
+        overlay.classList.add("flex");
+        if (overlay.requestFullscreen && !document.fullscreenElement) overlay.requestFullscreen().catch(() => {});
+      }
+      function chiudi() {
+        overlay.classList.add("hidden");
+        overlay.classList.remove("flex");
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      }
+      function sposta(passo: number) {
+        ci = (ci + passo + dati.classi.length) % dati.classi.length;
+        mostra();
+      }
+
+      document.querySelectorAll<HTMLButtonElement>(".qr-q").forEach((b) =>
+        b.addEventListener("click", () => { qi = Number(b.dataset.qrQ); aggiornaConteggi(); }));
+      document.querySelectorAll<HTMLButtonElement>("[data-qr-classe]").forEach((b) =>
+        b.addEventListener("click", () => apri(b.dataset.qrClasse || "")));
+      el("qr-prev").addEventListener("click", () => sposta(-1));
+      el("qr-next").addEventListener("click", () => sposta(1));
+      el("qr-chiudi").addEventListener("click", chiudi);
+      el("qr-copia").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(dati.questionari[qi].url + encodeURIComponent(dati.classi[ci]));
+          el("qr-copia").textContent = "Copiato";
+        } catch { el("qr-copia").textContent = "Copia non riuscita"; }
+      });
+      document.addEventListener("keydown", (e) => {
+        if (overlay.classList.contains("hidden")) return;
+        if (e.key === "Escape") chiudi();
+        else if (e.key === "ArrowRight") sposta(1);
+        else if (e.key === "ArrowLeft") sposta(-1);
+      });
+      // Uscendo dallo schermo intero (Esc del browser) si chiude anche il QR.
+      document.addEventListener("fullscreenchange", () => {
+        if (!document.fullscreenElement && !overlay.classList.contains("hidden")) chiudi();
+      });
+      aggiornaConteggi();
+    }
+  </script>
+
   {/* Verifica codice */}
   <section class="mt-10 rounded-xl border border-nx-gray-light/20 bg-white p-6 shadow-sm">
     <h2 class="text-lg font-bold text-nx-dark">Verifica un codice di completamento</h2>
@@ -231,7 +398,13 @@ const MAX_RIGHE = 1000;
       </button>
     </form>
     {codiceRaw && (
-      codiceTrovato ? (
+      codiceSeparato ? (
+        <p class="mt-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
+          <span class="font-bold">Codice valido.</span>
+          {" "}{qLabel(codiceSeparato.q)}, classe {codiceSeparato.classe}.
+          {" "}Il codice non è collegato a nessuna risposta.
+        </p>
+      ) : codiceTrovato ? (
         <p class="mt-4 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
           <span class="font-bold">Codice valido.</span>
           {" "}{qLabel(codiceTrovato.q)}, classe {codiceTrovato.classe}, inviato il {data(codiceTrovato.r.createdAt)}.
@@ -253,11 +426,11 @@ const MAX_RIGHE = 1000;
     <section id="dettaglio" class="mt-10 rounded-xl border-2 border-nx-blue/30 bg-white p-6 shadow-sm">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 class="text-lg font-bold text-nx-dark">Risposta {dettaglio.row.r.completionCode}</h2>
+          <h2 class="text-lg font-bold text-nx-dark">Risposta {dettaglio.row.r.completionCode || `del ${data(dettaglio.row.r.createdAt)}`}</h2>
           <p class="mt-1 text-sm text-nx-gray-dark">
             {qLabel(dettaglio.row.q)} · classe {dettaglio.row.classe} · {data(dettaglio.row.r.createdAt)}
             {dettaglio.row.minuti != null && ` · ${dettaglio.row.minuti} minuti`}
-            {dettaglio.row.r.anonymousCode && ` · codice ${dettaglio.row.r.anonymousCode}`}
+            {dettaglio.row.r.anonymousCode && ` · abbinamento ${dettaglio.row.r.anonymousCode}`}
           </p>
         </div>
         <a href={link({ r: null })} class="text-xs font-semibold uppercase tracking-wider text-nx-gray-dark no-underline hover:text-nx-blue">
@@ -364,7 +537,7 @@ const MAX_RIGHE = 1000;
               <th class="px-3 py-3">Inviata</th>
               <th class="px-3 py-3">Questionario</th>
               <th class="px-3 py-3">Classe</th>
-              <th class="px-3 py-3">Codice studente</th>
+              <th class="px-3 py-3">Abbinamento</th>
               <th class="px-3 py-3">Codice di completamento</th>
               <th class="px-3 py-3 text-right">Minuti</th>
               <th class="px-3 py-3"></th>
@@ -377,7 +550,7 @@ const MAX_RIGHE = 1000;
                 <td class="whitespace-nowrap px-3 py-2.5 font-semibold text-nx-dark">{x.q?.slug.toUpperCase() ?? "?"}</td>
                 <td class="px-3 py-2.5">{x.classe}</td>
                 <td class="px-3 py-2.5 font-mono">{x.r.anonymousCode ?? ""}</td>
-                <td class="px-3 py-2.5 font-mono text-nx-blue">{x.r.completionCode}</td>
+                <td class="px-3 py-2.5 font-mono text-nx-blue">{x.r.completionCode || <span class="font-sans text-nx-gray-dark">a parte</span>}</td>
                 <td class="px-3 py-2.5 text-right tabular-nums">{x.minuti ?? ""}</td>
                 <td class="px-3 py-2.5 text-right">
                   <a href={link({ r: x.r.id, codice: null }) + "#dettaglio"} class="font-semibold text-nx-blue no-underline hover:underline">Vedi</a>

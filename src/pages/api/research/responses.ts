@@ -51,9 +51,13 @@ export const POST: APIRoute = async (ctx) => {
     payload,
     userAgent: ctx.request.headers.get("User-Agent") ?? undefined,
     ipHash: ipHash ?? undefined,
+    codeKey: env.RESEARCH_CODE_KEY,
   });
   if ("error" in result) return json({ ok: false, error: result.error }, 400);
 
+  // Con il codice di completamento separato dalle risposte, al browser non torna nulla
+  // che colleghi i due (né l'id della risposta né il codice di abbinamento).
+  if (result.unlinked) return json({ ok: true, completionCode: result.completionCode, unlinked: true });
   return json({
     ok: true,
     id: result.id,
