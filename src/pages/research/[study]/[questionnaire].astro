@@ -1143,6 +1143,8 @@ const UI = UI_TEXTS[lang];
           });
         }
 
+        // nx_letter_fields: vedi setupLetterField più sotto
+        const letterFields = Array.isArray(schema && schema.nx_letter_fields) ? schema.nx_letter_fields : [];
         survey.onAfterRenderQuestion.add(function (sender, options) {
           const q = options.question;
           if (q && options.htmlElement) {
@@ -1154,8 +1156,29 @@ const UI = UI_TEXTS[lang];
             if (wantsCards && t === "radiogroup") {
               requestAnimationFrame(function () { fitCards(q, options.htmlElement); });
             }
+            if (letterFields.indexOf(q.name) !== -1) setupLetterField(options.htmlElement);
           }
         });
+
+        // === Campi da una lettera (schema con nx_letter_fields: [nomi]) ===
+        // Si accettano solo lettere: il resto si toglie mentre si scrive. Niente maschera di
+        // SurveyJS, che su Safari per iPhone (WebKit) blocca la scrittura: il segnaposto "_"
+        // occupa l'unico carattere permesso da maxLength 1.
+        function setupLetterField(root) {
+          const input = root.querySelector("input[type='text'], input:not([type])");
+          if (!input || input.dataset.nxLetter) return;
+          input.dataset.nxLetter = "1";
+          input.setAttribute("autocapitalize", "characters");
+          input.setAttribute("autocorrect", "off");
+          input.setAttribute("autocomplete", "off");
+          input.setAttribute("spellcheck", "false");
+          function clean() {
+            const v = input.value.replace(/[^A-Za-zÀ-ÖØ-öø-ÿ]/g, "").slice(-1);
+            if (v !== input.value) input.value = v;
+          }
+          input.addEventListener("input", function (e) { if (!e.isComposing) clean(); });
+          input.addEventListener("compositionend", clean);
+        }
 
         // === Opzioni a card (schema con nx_choice_cards: true) ===
         // In riga se ogni etichetta ci sta (nessuna parola esce dalla card, al massimo
