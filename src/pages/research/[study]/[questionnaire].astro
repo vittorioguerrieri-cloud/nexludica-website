@@ -458,6 +458,20 @@ const UI = UI_TEXTS[lang];
       font-weight: 700;
       color: #1b2528;
     }
+    /* Sui telefoni SurveyJS scrive anche lui l'etichetta della colonna, accanto al pallino:
+       con la nostra sotto il pallino comparirebbe due volte (visto il 12/11/2026). */
+    .sd-question table > tbody > tr > td[data-col-label] .sd-matrix__responsive-title,
+    .sd-element table > tbody > tr > td[data-col-label] .sd-matrix__responsive-title {
+      display: none !important;
+    }
+    /* e il pallino, rimasto solo nella cella, va centrato sopra la sua etichetta */
+    .sd-question table > tbody > tr > td[data-col-label] .sd-matrix__label,
+    .sd-element table > tbody > tr > td[data-col-label] .sd-matrix__label {
+      display: flex !important;
+      justify-content: center !important;
+      width: 100% !important;
+      margin: 0 !important;
+    }
 
     /* Reset item radio interno (rimuovi spaziature SurveyJS) */
     .sd-question table .sd-item,
