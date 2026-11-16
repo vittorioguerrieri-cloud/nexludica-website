@@ -1294,9 +1294,14 @@ const UI = UI_TEXTS[lang];
           el.style.setProperty("box-shadow", "0 1px 2px rgba(0, 0, 0, 0.03)", "important");
         }
 
+        // nx_no_probe: domande che non fanno scattare l'avviso giallo quando restano vuote
+        // (per esempio le caselle 2-5 di un elenco "fino a cinque cose": l'avviso spingerebbe
+        // a riempirle tutte).
+        const noProbe = new Set(Array.isArray(schema && schema.nx_no_probe) ? schema.nx_no_probe : []);
         function probeQuestion(q) {
           if (q.isRequired) return 0;
           if (q.isVisible === false) return 0;
+          if (noProbe.has(q.name)) return 0;
           const root = questionDom.get(q.name);
           const t = (q.getType && q.getType()) || q.type;
 
