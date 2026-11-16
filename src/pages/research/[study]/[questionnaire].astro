@@ -136,7 +136,7 @@ const UI = UI_TEXTS[lang];
   </div>
 
   <!-- SurveyJS container -->
-  <link href="https://unpkg.com/survey-core@1.12.12/defaultV2.min.css" rel="stylesheet" />
+  <link href="/vendor/surveyjs/1.12.12/defaultV2.min.css" rel="stylesheet" />
   <div id="surveyContainer" class="mt-8"></div>
 
   <!-- Modal popup "ripresa progresso": appare all'apertura del questionario
@@ -273,6 +273,10 @@ const UI = UI_TEXTS[lang];
       <p class="mx-auto mt-3 max-w-md text-base font-bold text-nx-blue">{UI.codeHint}</p>
       <p id="completion-code-unlinked" class="mx-auto mt-2 hidden max-w-md text-sm text-nx-gray-dark">{UI.codeUnlinked}</p>
     </div>
+
+    <!-- Debriefing (schema con nx_debriefing: testo HTML mostrato dopo l'invio, per esempio
+         lo scopo vero dello studio quando prima non si poteva dire) -->
+    <div id="nx-debriefing" class="mx-auto mt-6 hidden max-w-xl rounded-lg border border-nx-cyan/30 bg-white p-5 text-left text-base leading-relaxed text-nx-dark"></div>
 
     <!-- Prolific completion button (mostrato solo se utente è arrivato via Prolific) -->
     <div id="prolific-return" class="mt-6 hidden">
@@ -556,6 +560,17 @@ const UI = UI_TEXTS[lang];
       transition: background-color 0.3s ease, box-shadow 0.3s ease;
     }
 
+    /* Debriefing dopo l'invio (nx_debriefing): testo pieno e scuro, non quello leggero del
+       pannello di ringraziamento */
+    #nx-debriefing,
+    #nx-debriefing p {
+      color: #1b2528 !important;
+      font-weight: 400 !important;
+    }
+    #nx-debriefing strong {
+      font-weight: 700 !important;
+    }
+
     /* === 4. OPZIONI A CARD (schema con nx_choice_cards: true) ===
        Le risposte a scelta singola diventano card affiancate da sinistra a destra,
        su una sola riga. Se un'etichetta non ci sta (una parola esce dalla card o
@@ -651,11 +666,11 @@ const UI = UI_TEXTS[lang];
     }
   </style>
 
-  <script src="https://unpkg.com/survey-core@1.12.12/survey.core.min.js" is:inline></script>
+  <script src="/vendor/surveyjs/1.12.12/survey.core.min.js" is:inline></script>
   {lang === "it" && (
-    <script src="https://unpkg.com/survey-core@1.12.12/i18n/italian.min.js" is:inline></script>
+    <script src="/vendor/surveyjs/1.12.12/i18n/italian.min.js" is:inline></script>
   )}
-  <script src="https://unpkg.com/survey-js-ui@1.12.12/survey-js-ui.min.js" is:inline></script>
+  <script src="/vendor/surveyjs/1.12.12/survey-js-ui.min.js" is:inline></script>
   <script
     is:inline
     define:vars={{ schemaJson: schemaForClient, themeJson: theme, questionnaireId, prolificCompletionUrl, uiText: UI }}
@@ -1770,6 +1785,11 @@ const UI = UI_TEXTS[lang];
             // Mostra pannello grazie con completion code
             document.getElementById("completion-code").textContent = data.completionCode;
             if (data.unlinked) document.getElementById("completion-code-unlinked").classList.remove("hidden");
+            if (schema && typeof schema.nx_debriefing === "string" && schema.nx_debriefing) {
+              const deb = document.getElementById("nx-debriefing");
+              deb.innerHTML = schema.nx_debriefing;
+              deb.classList.remove("hidden");
+            }
             document.getElementById("thankyou").classList.remove("hidden");
             // Prolific: se l'utente è arrivato via Prolific (PROLIFIC_PID nella URL)
             // E lo studio ha un completion URL configurato, nascondi il completion
