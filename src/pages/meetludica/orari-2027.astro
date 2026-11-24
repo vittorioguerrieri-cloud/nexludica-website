@@ -1,0 +1,213 @@
+---
+/**
+ * Sondaggio per gli iscritti: giorni e fasce orarie preferite per i MeetLudica
+ * 2027, che si terranno in orario lavorativo. Le risposte finiscono nella tabella
+ * meetludica_orari_2027 e si consultano in Area soci > MeetLudica > Sondaggio orari.
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { ORARI_GIORNI, ORARI_FASCE } from "../../server/meetludica-orari";
+
+export const prerender = false;
+---
+
+<BaseLayout
+  title="MeetLudica 2027: quando ci vediamo? — NexLudica APS"
+  description="Dal 2027 i MeetLudica si tengono in orario lavorativo. Dicci quali giorni e fasce orarie preferisci."
+>
+  <section class="mx-auto max-w-2xl px-4 pb-24 pt-28 lg:pt-32">
+    <a href="/meetludica" class="text-sm font-semibold text-nx-cyan no-underline hover:underline">
+      ← MeetLudica
+    </a>
+
+    <h1 class="mt-4 text-4xl font-black leading-tight tracking-tight text-nx-dark sm:text-5xl" style="font-family: var(--font-display);">
+      MeetLudica 2027: quando ci vediamo?
+    </h1>
+    <p class="mt-5 text-lg leading-relaxed text-nx-gray-dark">
+      Dal 2027 i MeetLudica si terranno <strong class="text-nx-dark">durante l'orario lavorativo</strong>,
+      dal lunedì al venerdì, sempre online. Prima di fissare il calendario vogliamo sapere
+      quando vi è più comodo.
+    </p>
+    <p class="mt-3 text-base text-nx-gray-dark">
+      Segna tutte le fasce in cui potresti partecipare a un incontro di circa un'ora e mezza.
+      Ci vuole un minuto.
+    </p>
+
+    <form id="orari-form" class="mt-10 space-y-6 rounded-xl border border-nx-gray-light/30 bg-white p-5 shadow-sm sm:p-6">
+      <input type="text" name="company" tabindex="-1" autocomplete="off" style="position:absolute; left:-9999px; opacity:0; pointer-events:none;" />
+
+      <div>
+        <p class="text-sm font-medium text-nx-dark">Giorni e fasce orarie che ti vanno bene</p>
+        <p class="mt-1 text-xs text-nx-gray-dark">
+          Tocca le caselle per selezionarle. Toccando il nome di un giorno lo selezioni tutto.
+        </p>
+        <div class="mt-3 overflow-x-auto">
+          <table class="w-full table-fixed border-separate" style="border-spacing: 4px;">
+            <thead>
+              <tr>
+                <th class="w-24 text-left text-xs font-medium text-nx-gray-dark sm:w-32"></th>
+                {ORARI_GIORNI.map((g) => (
+                  <th class="p-0">
+                    <button type="button" data-day={g.key}
+                      class="nx-day w-full rounded-md py-1.5 text-xs font-bold uppercase tracking-wide text-nx-dark hover:bg-nx-cyan/10"
+                      aria-label={`Seleziona tutto ${g.label}`}>
+                      <span class="sm:hidden">{g.short}</span>
+                      <span class="hidden sm:inline">{g.label}</span>
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {ORARI_FASCE.map((f) => (
+                <tr>
+                  <th scope="row" class="pr-1 text-left align-middle text-xs font-medium leading-tight text-nx-dark sm:text-sm">
+                    {f.label}
+                    {"hint" in f && <span class="block text-[11px] font-normal text-nx-gray-dark">{f.hint}</span>}
+                  </th>
+                  {ORARI_GIORNI.map((g) => (
+                    <td class="p-0">
+                      <label class="nx-cell flex h-11 cursor-pointer items-center justify-center rounded-md border border-nx-gray-light/50 bg-white transition hover:border-nx-cyan">
+                        <input type="checkbox" name="slots" value={`${g.key}-${f.key}`} data-day={g.key} class="sr-only" />
+                        <svg class="nx-check hidden h-5 w-5 text-white" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                          <path d="M4.5 10.5l3.5 3.5 7.5-8" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <span class="sr-only">{g.label}, {f.label}</span>
+                      </label>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p id="orari-count" class="mt-2 text-xs text-nx-gray-dark">Nessuna fascia selezionata.</p>
+      </div>
+
+      <div>
+        <label for="orari-notes" class="block text-sm font-medium text-nx-dark">Note <span class="font-normal text-nx-gray-dark">(opzionale)</span></label>
+        <textarea id="orari-notes" name="notes" rows="3" maxlength="1000"
+          placeholder="Vincoli particolari, settimane da evitare, o se nessuna fascia ti va bene."
+          class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20"></textarea>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="orari-name" class="block text-sm font-medium text-nx-dark">Nome e cognome <span class="text-red-500">*</span></label>
+          <input id="orari-name" name="name" required maxlength="100" autocomplete="name" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+        <div>
+          <label for="orari-email" class="block text-sm font-medium text-nx-dark">Email <span class="text-red-500">*</span></label>
+          <input id="orari-email" type="email" name="email" required maxlength="200" autocomplete="email" class="mt-1 block w-full rounded-lg border border-nx-gray-light/40 px-3 py-2 text-sm focus:border-nx-cyan focus:ring-2 focus:ring-nx-cyan/20" />
+        </div>
+      </div>
+      <p class="-mt-2 text-xs text-nx-gray-dark">
+        Se cambi idea, compila di nuovo con la stessa email: la nuova risposta sostituisce la precedente.
+      </p>
+
+      <p class="text-xs leading-relaxed text-nx-gray-dark">
+        Usiamo nome, email e risposte solo per organizzare il calendario dei MeetLudica 2027;
+        le vede soltanto lo staff di NexLudica. Titolare è NexLudica APS: dettagli
+        nell'<a href="/privacy-policy" target="_blank" class="underline">informativa privacy</a>.
+      </p>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="submit" id="orari-submit" class="rounded-lg bg-nx-cyan px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-white shadow-md transition hover:-translate-y-0.5 hover:bg-nx-blue disabled:opacity-50">
+          Invia
+        </button>
+        <span id="orari-status" class="text-sm"></span>
+      </div>
+    </form>
+
+    <div id="orari-done" class="mt-10 hidden rounded-xl border border-emerald-200 bg-emerald-50 p-6">
+      <p id="orari-done-title" class="text-lg font-bold text-emerald-800">Risposta registrata</p>
+      <p class="mt-2 text-sm text-emerald-900">
+        Grazie. Quando avremo raccolto le preferenze annunceremo il calendario 2027 sulla mailing list.
+      </p>
+      <a href="/meetludica" class="mt-4 inline-block text-sm font-semibold text-nx-cyan no-underline hover:underline">
+        ← Torna a MeetLudica
+      </a>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .nx-cell:has(input:checked) {
+    background: var(--color-nx-cyan, #05abc4);
+    border-color: var(--color-nx-cyan, #05abc4);
+  }
+  .nx-cell:has(input:checked) .nx-check { display: block; }
+  .nx-cell:has(input:focus-visible) { outline: 2px solid var(--color-nx-cyan, #05abc4); outline-offset: 2px; }
+</style>
+
+<script is:inline>
+  (function () {
+    const form = document.getElementById("orari-form");
+    if (!form) return;
+    const statusEl = document.getElementById("orari-status");
+    const submitBtn = document.getElementById("orari-submit");
+    const done = document.getElementById("orari-done");
+    const countEl = document.getElementById("orari-count");
+    const boxes = Array.from(form.querySelectorAll('input[name="slots"]'));
+
+    function refresh() {
+      const n = boxes.filter((b) => b.checked).length;
+      countEl.textContent = n === 0 ? "Nessuna fascia selezionata."
+        : n === 1 ? "1 fascia selezionata." : n + " fasce selezionate.";
+    }
+    boxes.forEach((b) => b.addEventListener("change", refresh));
+
+    form.querySelectorAll(".nx-day").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const day = btn.getAttribute("data-day");
+        const col = boxes.filter((b) => b.getAttribute("data-day") === day);
+        const allOn = col.every((b) => b.checked);
+        col.forEach((b) => { b.checked = !allOn; });
+        refresh();
+      });
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const body = {
+        name: fd.get("name"),
+        email: fd.get("email"),
+        notes: fd.get("notes"),
+        company: fd.get("company"),
+        slots: fd.getAll("slots"),
+      };
+      if (body.slots.length === 0 && !String(body.notes || "").trim()) {
+        statusEl.textContent = "Seleziona almeno una fascia, oppure scrivici nelle note.";
+        statusEl.className = "text-sm text-red-600";
+        return;
+      }
+      submitBtn.disabled = true;
+      statusEl.textContent = "Invio in corso...";
+      statusEl.className = "text-sm text-nx-gray-dark";
+      try {
+        const res = await fetch("/api/meetludica/orari", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          statusEl.textContent = data.error || "Errore " + res.status;
+          statusEl.className = "text-sm text-red-600";
+          submitBtn.disabled = false;
+          return;
+        }
+        if (data.updated) {
+          document.getElementById("orari-done-title").textContent = "Risposta aggiornata";
+        }
+        form.classList.add("hidden");
+        done.classList.remove("hidden");
+        done.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch (err) {
+        statusEl.textContent = "Errore di rete, riprova.";
+        statusEl.className = "text-sm text-red-600";
+        submitBtn.disabled = false;
+      }
+    });
+  })();
+</script>
