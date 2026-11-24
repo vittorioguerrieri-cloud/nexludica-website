@@ -224,6 +224,7 @@ const availLabels: Record<string, { label: string; cls: string }> = {
           </button>
           <span id="broadcast-status" class="text-xs"></span>
         </div>
+        <p id="broadcast-draft-status" class="text-[11px] text-nx-gray-dark">La bozza si salva da sola mentre scrivi e resta qui finché non la invii.</p>
       </form>
       <div id="broadcast-preview" class="mt-4 hidden rounded-lg border border-nx-gray-light/30 bg-white p-4 text-sm">
         <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-nx-gray-dark">Anteprima (cosi' apparira' nell'email)</p>
@@ -1089,6 +1090,9 @@ const availLabels: Record<string, { label: string; cls: string }> = {
         } else {
           bcStatus.textContent = "✓ Inviata a " + data.sent + " destinatari";
           bcStatus.className = "text-xs font-semibold text-emerald-600";
+          draftDirty = false;
+          if (draftTimer) clearTimeout(draftTimer);
+          await fetch("/api/admin/meetludica/broadcast-draft", { method: "DELETE" }).catch(() => {});
           setTimeout(() => location.reload(), 1500);
         }
       } catch (e) {
@@ -1098,6 +1102,47 @@ const availLabels: Record<string, { label: string; cls: string }> = {
         bcSendBtn.disabled = false;
       }
     }
+    // === Bozza salvata sul server ===
+    const draftStatus = document.getElementById("broadcast-draft-status");
+    const subjInput = bcForm.querySelector('input[name="subject"]');
+    let draftTimer = null;
+    let draftDirty = false;
+    function fmtTime(ts) {
+      return new Date(ts).toLocaleString("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    }
+    async function saveDraft() {
+      draftTimer = null;
+      if (!draftDirty) return;
+      draftDirty = false;
+      try {
+        const res = await fetch("/api/admin/meetludica/broadcast-draft", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject: subjInput.value, body: bodyTa.value }),
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) draftStatus.textContent = "Bozza salvata alle " + fmtTime(data.updatedAt) + ".";
+        else { draftStatus.textContent = "Bozza non salvata: " + (data.error || res.status); draftDirty = true; }
+      } catch { draftStatus.textContent = "Bozza non salvata (errore di rete)."; draftDirty = true; }
+    }
+    function scheduleDraft() {
+      draftDirty = true;
+      draftStatus.textContent = "Modifiche non ancora salvate...";
+      if (draftTimer) clearTimeout(draftTimer);
+      draftTimer = setTimeout(saveDraft, 1500);
+    }
+    subjInput.addEventListener("input", scheduleDraft);
+    bodyTa.addEventListener("input", scheduleDraft);
+    window.addEventListener("beforeunload", () => { if (draftDirty) saveDraft(); });
+    fetch("/api/admin/meetludica/broadcast-draft").then((r) => r.json()).then((data) => {
+      if (!data.ok || !data.draft) return;
+      if (subjInput.value || bodyTa.value) return;
+      subjInput.value = data.draft.subject;
+      bodyTa.value = data.draft.body;
+      draftStatus.textContent = "Bozza ripresa: ultima modifica " + fmtTime(data.draft.updatedAt) +
+        (data.draft.updatedBy ? " (" + data.draft.updatedBy + ")" : "") + ".";
+    }).catch(() => {});
+
     bcForm.addEventListener("submit", (e) => {
       e.preventDefault();
       if (!confirm("Sicuro/a di voler inviare il broadcast a tutti gli iscritti?")) return;

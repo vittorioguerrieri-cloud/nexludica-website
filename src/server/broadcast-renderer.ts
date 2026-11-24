@@ -20,6 +20,8 @@
  *     Abstract del talk con eventuali **grassetti**, link e bullet.
  *     :::
  *
+ * Senza l'attributo photo il riquadro viene reso a tutta larghezza, senza foto.
+ *
  * Il rendering produce HTML inline-styled compatibile con i principali
  * client email (Gmail, Apple Mail, Outlook, Thunderbird). Layout a tabella
  * per il riquadro speaker, niente flexbox.
@@ -301,6 +303,20 @@ function renderSpeakerBlock(attrsRaw: string, content: string): string {
     : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100" height="100" style="width:100px;height:100px;border-radius:50%;background-color:#ffffff;border:2px dashed ${COLORS.cyan};">
          <tr><td align="center" valign="middle" style="color:${COLORS.cyan};font-size:36px;font-weight:700;font-family:Montserrat,system-ui,sans-serif;">?</td></tr>
        </table>`;
+
+  // Senza nessun attributo photo il riquadro e' a tutta larghezza, senza foto
+  // (il segnaposto "?" resta per photo="" o URL non valido: ricorda di caricarla).
+  const hasPhotoAttr = "photo" in attrs || "foto" in attrs || "img" in attrs;
+  if (!hasPhotoAttr) {
+    return `
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0;background-color:${COLORS.cyanLight};border:1px solid ${COLORS.cyan};border-radius:12px;border-collapse:separate;">
+  <tr>
+    <td valign="top" style="padding:14px 18px;color:${COLORS.dark};font-size:14px;line-height:1.55;">
+      <div style="font-size:14px;color:${COLORS.dark};">${innerHtml}</div>
+    </td>
+  </tr>
+</table>`;
+  }
 
   // Tabella per compatibilita' Outlook: niente flexbox, tutto inline
   return `
